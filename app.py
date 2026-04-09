@@ -103,7 +103,6 @@ def process_subject(subject_name, days_left, topics):
 
     most_prioritized_topic = topic_suggestions[0]["topic"]
     highest_weakness = topic_suggestions[0]["weakness_level"]
-
     subject_priority_score = urgency_score + highest_weakness
 
     return {
@@ -141,7 +140,7 @@ def process_all_subjects(subjects_data):
 
 
 # -------------------------------
-# Streamlit page config
+# Streamlit page setup
 # -------------------------------
 
 st.set_page_config(
@@ -150,18 +149,8 @@ st.set_page_config(
     layout="wide"
 )
 
-# -------------------------------
-# Header
-# -------------------------------
-
 st.title("📚 Smart Revision Planner")
-st.markdown(
-    "Plan your revision smarter based on **exam time**, **topic weakness**, and **subject priority**."
-)
-
-# -------------------------------
-# Subject input
-# -------------------------------
+st.write("Plan your study smarter based on exam time, topic weakness, and subject priority.")
 
 num_subjects = st.number_input(
     "How many subjects do you want to enter?",
@@ -174,7 +163,6 @@ num_subjects = st.number_input(
 subjects_data = []
 
 for s in range(num_subjects):
-    st.markdown("---")
     st.subheader(f"Subject {s+1}")
 
     subject_name = st.text_input(
@@ -215,6 +203,7 @@ for s in range(num_subjects):
 
     for t in range(num_topics):
         st.markdown(f"**Topic {t+1}**")
+
         topic_col1, topic_col2 = st.columns(2)
 
         with topic_col1:
@@ -241,10 +230,6 @@ for s in range(num_subjects):
         "topics": topics
     })
 
-# -------------------------------
-# Generate plan
-# -------------------------------
-
 if st.button("Generate Smart Revision Plan"):
     result = process_all_subjects(subjects_data)
 
@@ -252,7 +237,6 @@ if st.button("Generate Smart Revision Plan"):
         st.error(result["error"])
     else:
         st.success("Your smart revision plan has been generated!")
-
         st.header("📌 Revision Suggestions")
 
         for i, subject in enumerate(result["all_subject_results"], start=1):
