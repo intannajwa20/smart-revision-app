@@ -23,6 +23,24 @@ st.set_page_config(
 )
 
 # ---------------------------------
+# Demo users
+# ---------------------------------
+DEMO_USERS = {
+    "wawa": "1234",
+    "student": "revision123",
+    "admin": "smartplanner"
+}
+
+# ---------------------------------
+# Session state defaults
+# ---------------------------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if "username" not in st.session_state:
+    st.session_state.username = ""
+
+# ---------------------------------
 # Custom styling
 # ---------------------------------
 st.markdown("""
@@ -137,6 +155,28 @@ st.markdown("""
     border: 1px solid rgba(255,255,255,0.06);
     margin-bottom: 0.8rem;
 }
+.login-wrap {
+    max-width: 460px;
+    margin: 3rem auto;
+    padding: 2rem;
+    border-radius: 24px;
+    background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.08), transparent 30%),
+        linear-gradient(135deg, rgba(142,68,173,0.25), rgba(20,20,35,0.96));
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 10px 35px rgba(0,0,0,0.22);
+}
+.login-title {
+    font-size: 2.2rem;
+    font-weight: 800;
+    text-align: center;
+    margin-bottom: 0.3rem;
+}
+.login-subtitle {
+    text-align: center;
+    color: #d4cbe8;
+    margin-bottom: 1.4rem;
+}
 hr {
     border: none;
     border-top: 1px solid rgba(255,255,255,0.08);
@@ -157,11 +197,9 @@ def convert_to_days(value, unit):
         return int(value * 30)
     return int(value)
 
-
 def format_minutes(minutes):
     hours = minutes // 60
     remaining_minutes = minutes % 60
-
     if hours > 0 and remaining_minutes > 0:
         return f"{int(hours)} hour(s) {int(remaining_minutes)} minute(s)"
     elif hours > 0:
@@ -169,10 +207,8 @@ def format_minutes(minutes):
     else:
         return f"{int(remaining_minutes)} minute(s)"
 
-
 def shorten_text(text, max_len=14):
     return text if len(text) <= max_len else text[:max_len] + "..."
-
 
 def get_priority_details(days_left):
     if days_left <= 3:
@@ -185,7 +221,6 @@ def get_priority_details(days_left):
         return "Low", 2, 20
     else:
         return "Very Low", 1, 15
-
 
 def get_study_method(weakness_level):
     if weakness_level >= 4:
@@ -207,13 +242,11 @@ def get_study_method(weakness_level):
             "Try a quick quiz, skim notes, or make a simple mind map."
         )
 
-
 def calculate_readiness_score(days_left, avg_weakness):
     time_factor = min(days_left / 30, 1.0) * 50
     weakness_factor = ((6 - avg_weakness) / 5) * 50
     score = int(time_factor + weakness_factor)
     return max(0, min(score, 100))
-
 
 def get_readiness_status(score):
     if score >= 80:
@@ -225,7 +258,6 @@ def get_readiness_status(score):
     else:
         return "Focus Now"
 
-
 def get_study_mood(score):
     if score >= 80:
         return "🌸 You’re in great shape"
@@ -236,7 +268,6 @@ def get_study_mood(score):
     else:
         return "⚡ Time to lock in"
 
-
 def get_priority_badge(priority):
     if priority in ["Very High", "High"]:
         return '<span class="tag-high">Urgent</span>'
@@ -244,7 +275,6 @@ def get_priority_badge(priority):
         return '<span class="tag-medium">Moderate</span>'
     else:
         return '<span class="tag-low">Manageable</span>'
-
 
 def get_subject_icon(subject_name):
     name = subject_name.lower()
@@ -262,11 +292,9 @@ def get_subject_icon(subject_name):
         return "🌐"
     return "📘"
 
-
 def process_subject(subject_name, days_left, topics):
     if days_left <= 0:
         return {"error": f"Time left for subject '{subject_name}' must be greater than 0."}
-
     if len(topics) == 0:
         return {"error": f"Please enter at least one valid topic for subject '{subject_name}'."}
 
@@ -301,10 +329,7 @@ def process_subject(subject_name, days_left, topics):
             "urgency_score": urgency_score
         })
 
-    topic_suggestions.sort(
-        key=lambda x: (x["weakness_level"], x["urgency_score"]),
-        reverse=True
-    )
+    topic_suggestions.sort(key=lambda x: (x["weakness_level"], x["urgency_score"]), reverse=True)
 
     avg_weakness = sum(t["weakness_level"] for t in topic_suggestions) / len(topic_suggestions)
     subject_priority_score = round(urgency_score + avg_weakness, 2)
@@ -323,25 +348,15 @@ def process_subject(subject_name, days_left, topics):
         "readiness_status": get_readiness_status(readiness_score)
     }
 
-
 def process_all_subjects(subjects_data):
     all_subject_results = []
-
     for subject in subjects_data:
-        result = process_subject(
-            subject["subject_name"],
-            subject["days_left"],
-            subject["topics"]
-        )
-
+        result = process_subject(subject["subject_name"], subject["days_left"], subject["topics"])
         if "error" in result:
             return {"error": result["error"]}
-
         all_subject_results.append(result)
-
     all_subject_results.sort(key=lambda x: x["subject_priority_score"], reverse=True)
     return {"all_subject_results": all_subject_results}
-
 
 def flatten_topics(all_subject_results):
     rows = []
@@ -359,14 +374,12 @@ def flatten_topics(all_subject_results):
             })
     return pd.DataFrame(rows)
 
-
 def generate_study_timetable(topic_df):
     if topic_df.empty:
         return pd.DataFrame()
 
     timetable_rows = []
     day_counter = 1
-
     sorted_df = topic_df.sort_values(
         by=["Days Left", "Weakness Level", "Recommended Minutes"],
         ascending=[True, False, False]
@@ -374,7 +387,6 @@ def generate_study_timetable(topic_df):
 
     for _, row in sorted_df.iterrows():
         minutes_left = int(row["Recommended Minutes"])
-
         while minutes_left > 0:
             session_minutes = min(60, minutes_left)
             timetable_rows.append({
@@ -389,7 +401,6 @@ def generate_study_timetable(topic_df):
 
     return pd.DataFrame(timetable_rows)
 
-
 def get_focus_distribution(topic_df):
     if topic_df.empty:
         return pd.DataFrame(columns=["Category", "Count"])
@@ -403,33 +414,26 @@ def get_focus_distribution(topic_df):
 
     df = topic_df.copy()
     df["Category"] = df["Weakness Level"].apply(classify)
-    out = df["Category"].value_counts().rename_axis("Category").reset_index(name="Count")
-    return out
-
+    return df["Category"].value_counts().rename_axis("Category").reset_index(name="Count")
 
 def get_workload_by_subject(topic_df):
     if topic_df.empty:
         return pd.DataFrame(columns=["Subject", "Recommended Minutes"])
-
     out = topic_df.groupby("Subject", as_index=False)["Recommended Minutes"].sum()
     return out.sort_values("Recommended Minutes", ascending=False)
-
 
 def get_today_focus(topic_df):
     if topic_df.empty:
         return None
-
     top = topic_df.sort_values(
         by=["Days Left", "Weakness Level", "Recommended Minutes"],
         ascending=[True, False, False]
     ).iloc[0]
-
     return {
         "subject": top["Subject"],
         "topic": top["Topic"],
         "reason": "High weakness and closer exam date."
     }
-
 
 def create_download_text(all_subject_results, summary_values, timetable_df):
     output = StringIO()
@@ -441,7 +445,6 @@ def create_download_text(all_subject_results, summary_values, timetable_df):
     output.write(f"Total Topics: {summary_values['total_topics']}\n")
     output.write(f"Total Recommended Study Time: {summary_values['total_study_time']}\n")
     output.write(f"Overall Readiness Score: {summary_values['overall_readiness']}%\n\n")
-
     output.write("SUBJECT RANKINGS\n")
     output.write("=" * 50 + "\n")
 
@@ -469,9 +472,7 @@ def create_download_text(all_subject_results, summary_values, timetable_df):
                 f"{row['Day']}: {row['Subject']} - {row['Topic']} - "
                 f"{row['Study Duration']} - {row['Study Method']}\n"
             )
-
     return output.getvalue()
-
 
 def load_sample_data():
     return [
@@ -498,26 +499,19 @@ def load_sample_data():
 def draw_pdf_background(canvas, doc):
     width, height = A4
     canvas.saveState()
-
     canvas.setFillColor(colors.HexColor("#0B1020"))
     canvas.rect(0, 0, width, height, fill=1, stroke=0)
-
     canvas.setFillColor(colors.HexColor("#6C3BB8"))
     canvas.rect(0, height - 70, width, 70, fill=1, stroke=0)
-
     canvas.setFillColor(colors.HexColor("#8E44AD"))
     canvas.rect(0, 0, width, 12, fill=1, stroke=0)
-
     canvas.setFillColor(colors.whitesmoke)
     canvas.setFont("Helvetica-Bold", 10)
     canvas.drawRightString(width - 18 * mm, 8 * mm, f"Page {doc.page}")
-
     canvas.restoreState()
-
 
 def build_revision_pdf(all_subject_results, summary_values, timetable_df):
     buffer = BytesIO()
-
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
@@ -528,62 +522,31 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
     )
 
     styles = getSampleStyleSheet()
-
     title_style = ParagraphStyle(
-        "TitleStyle",
-        parent=styles["Title"],
-        fontName="Helvetica-Bold",
-        fontSize=24,
-        leading=30,
-        alignment=TA_CENTER,
-        textColor=colors.whitesmoke,
-        spaceAfter=10
+        "TitleStyle", parent=styles["Title"], fontName="Helvetica-Bold",
+        fontSize=24, leading=30, alignment=TA_CENTER,
+        textColor=colors.whitesmoke, spaceAfter=10
     )
-
     subtitle_style = ParagraphStyle(
-        "SubtitleStyle",
-        parent=styles["Normal"],
-        fontName="Helvetica",
-        fontSize=10.5,
-        leading=15,
-        alignment=TA_CENTER,
-        textColor=colors.HexColor("#E3D9F7"),
-        spaceAfter=18
+        "SubtitleStyle", parent=styles["Normal"], fontName="Helvetica",
+        fontSize=10.5, leading=15, alignment=TA_CENTER,
+        textColor=colors.HexColor("#E3D9F7"), spaceAfter=18
     )
-
     heading_style = ParagraphStyle(
-        "HeadingStyle",
-        parent=styles["Heading2"],
-        fontName="Helvetica-Bold",
-        fontSize=14,
-        leading=18,
-        textColor=colors.HexColor("#F0E4FF"),
-        spaceBefore=10,
-        spaceAfter=8
+        "HeadingStyle", parent=styles["Heading2"], fontName="Helvetica-Bold",
+        fontSize=14, leading=18, textColor=colors.HexColor("#F0E4FF"),
+        spaceBefore=10, spaceAfter=8
     )
-
     body_style = ParagraphStyle(
-        "BodyStyle",
-        parent=styles["BodyText"],
-        fontName="Helvetica",
-        fontSize=10,
-        leading=14,
-        textColor=colors.whitesmoke,
-        alignment=TA_LEFT
+        "BodyStyle", parent=styles["BodyText"], fontName="Helvetica",
+        fontSize=10, leading=14, textColor=colors.whitesmoke, alignment=TA_LEFT
     )
-
     small_style = ParagraphStyle(
-        "SmallStyle",
-        parent=styles["BodyText"],
-        fontName="Helvetica",
-        fontSize=9,
-        leading=12,
-        textColor=colors.HexColor("#EAEAF2"),
-        alignment=TA_LEFT
+        "SmallStyle", parent=styles["BodyText"], fontName="Helvetica",
+        fontSize=9, leading=12, textColor=colors.HexColor("#EAEAF2"), alignment=TA_LEFT
     )
 
     story = []
-
     story.append(Spacer(1, 28))
     story.append(Paragraph("Smart Revision Planner", title_style))
     story.append(Paragraph(
@@ -618,7 +581,6 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
     story.append(PageBreak())
 
     story.append(Paragraph("Ranked Subject Review", heading_style))
-
     for i, subject in enumerate(all_subject_results, start=1):
         subject_title = (
             f"<b>{subject['subject_icon']} Subject Rank {i}: {subject['subject_name']}</b><br/>"
@@ -663,11 +625,8 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
         timetable_rows = [["Day", "Subject", "Topic", "Duration", "Method"]]
         for _, row in timetable_df.iterrows():
             timetable_rows.append([
-                row["Day"],
-                row["Subject"],
-                row["Topic"],
-                row["Study Duration"],
-                row["Study Method"]
+                row["Day"], row["Subject"], row["Topic"],
+                row["Study Duration"], row["Study Method"]
             ])
 
         timetable_table = Table(
@@ -691,20 +650,54 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
 
     story.append(Spacer(1, 16))
     story.append(Paragraph("Stay consistent. Small progress still counts.", small_style))
-
     doc.build(story, onFirstPage=draw_pdf_background, onLaterPages=draw_pdf_background)
     pdf = buffer.getvalue()
     buffer.close()
     return pdf
 
+# ---------------------------------
+# Login screen
+# ---------------------------------
+def show_login():
+    st.markdown("""
+    <div class="login-wrap">
+        <div class="login-title">🔐 Smart Planner Login</div>
+        <div class="login-subtitle">
+            Sign in to access your cute revision dashboard.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+
+        if st.button("Login", type="primary", use_container_width=True):
+            if username in DEMO_USERS and DEMO_USERS[username] == password:
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.rerun()
+            else:
+                st.error("Invalid username or password.")
+
+        with st.expander("Demo account"):
+            st.write("Username: `student`")
+            st.write("Password: `revision123`")
 
 # ---------------------------------
-# Sidebar
+# Main app
 # ---------------------------------
-with st.sidebar:
-    st.markdown("## 🌙 Planner Panel")
-    st.write("A soft, smarter revision helper for students.")
-    st.markdown("""
+def show_app():
+    with st.sidebar:
+        st.markdown("## 🌙 Planner Panel")
+        st.write(f"Logged in as **{st.session_state.username}**")
+        if st.button("Logout"):
+            st.session_state.logged_in = False
+            st.session_state.username = ""
+            st.rerun()
+
+        st.markdown("""
 **What this app does**
 - ranks your subjects
 - detects weakest topics
@@ -712,332 +705,324 @@ with st.sidebar:
 - creates a study timetable
 - exports TXT, CSV, and PDF
 """)
-    st.markdown("---")
-    st.markdown("### ✨ Cute focus tips")
-    st.caption("Start with the hardest topic first.")
-    st.caption("Short sessions are still productive.")
-    st.caption("Consistency beats panic revision.")
-    st.markdown("---")
-    st.markdown("### 🎀 Best use")
-    st.caption("Use 2–5 subjects for the cleanest output.")
-    st.caption("Keep topic names short and clear.")
+        st.markdown("---")
+        st.markdown("### ✨ Cute focus tips")
+        st.caption("Start with the hardest topic first.")
+        st.caption("Short sessions are still productive.")
+        st.caption("Consistency beats panic revision.")
+        st.markdown("---")
+        st.markdown("### 🎀 Best use")
+        st.caption("Use 2–5 subjects for the cleanest output.")
+        st.caption("Keep topic names short and clear.")
 
-# ---------------------------------
-# Hero section
-# ---------------------------------
-st.markdown("""
-<div class="hero-box">
-    <div class="main-title">📚 Smart Revision Planner</div>
-    <div class="subtitle">
-        Plan your study smarter based on exam time, topic weakness, and subject priority.
-        Now with a prettier dashboard, cute touches, a styled PDF report, and clearer study flow.
+    st.markdown(f"""
+    <div class="hero-box">
+        <div class="main-title">📚 Smart Revision Planner</div>
+        <div class="subtitle">
+            Welcome back, <b>{st.session_state.username}</b>. Plan your study smarter based on exam time,
+            topic weakness, and subject priority.
+        </div>
     </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
-# ---------------------------------
-# Controls
-# ---------------------------------
-top_col1, top_col2, top_col3 = st.columns([1, 1, 1])
+    top_col1, top_col2, top_col3 = st.columns([1, 1, 1])
 
-with top_col1:
-    use_sample = st.checkbox("Load sample demo data")
+    with top_col1:
+        use_sample = st.checkbox("Load sample demo data")
 
-with top_col2:
-    show_fun_mode = st.checkbox("Cute mode visuals", value=True)
+    with top_col2:
+        show_fun_mode = st.checkbox("Cute mode visuals", value=True)
 
-with top_col3:
-    if st.button("Reset Form"):
-        st.rerun()
+    with top_col3:
+        if st.button("Reset Form"):
+            st.rerun()
 
-# ---------------------------------
-# Input area
-# ---------------------------------
-if use_sample:
-    subjects_data = load_sample_data()
-    st.info("Sample data loaded. Click the button below to generate the planner.")
-else:
-    num_subjects = st.number_input(
-        "How many subjects do you want to enter?",
-        min_value=1,
-        max_value=10,
-        value=2,
-        step=1
-    )
-
-    subjects_data = []
-
-    for s in range(num_subjects):
-        st.markdown(f"<div class='section-card'><h3>Subject {s+1}</h3></div>", unsafe_allow_html=True)
-
-        subject_name = st.text_input(
-            f"Enter subject name for Subject {s+1}",
-            key=f"subject_name_{s}"
-        ).strip()
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            time_value = st.number_input(
-                f"Enter time left before exam for Subject {s+1}",
-                min_value=1,
-                value=7,
-                step=1,
-                key=f"time_value_{s}"
-            )
-
-        with col2:
-            time_unit = st.selectbox(
-                f"Select time unit for Subject {s+1}",
-                ["Day(s)", "Week(s)", "Month(s)"],
-                key=f"time_unit_{s}"
-            )
-
-        days_left = convert_to_days(time_value, time_unit)
-
-        num_topics = st.number_input(
-            f"How many topics for Subject {s+1}?",
+    if use_sample:
+        subjects_data = load_sample_data()
+        st.info("Sample data loaded. Click the button below to generate the planner.")
+    else:
+        num_subjects = st.number_input(
+            "How many subjects do you want to enter?",
             min_value=1,
             max_value=10,
             value=2,
-            step=1,
-            key=f"num_topics_{s}"
+            step=1
         )
 
-        topics = []
-        seen_topics = set()
+        subjects_data = []
 
-        for t in range(num_topics):
-            st.markdown(f"**Topic {t+1}**")
-            topic_col1, topic_col2 = st.columns(2)
+        for s in range(num_subjects):
+            st.markdown(f"<div class='section-card'><h3>Subject {s+1}</h3></div>", unsafe_allow_html=True)
 
-            with topic_col1:
-                topic_name = st.text_input(
-                    f"Enter topic {t+1} name",
-                    key=f"topic_name_{s}_{t}"
-                ).strip()
+            subject_name = st.text_input(
+                f"Enter subject name for Subject {s+1}",
+                key=f"subject_name_{s}"
+            ).strip()
 
-            with topic_col2:
-                weakness_level = st.slider(
-                    f"Weakness level for Topic {t+1}",
+            col1, col2 = st.columns(2)
+
+            with col1:
+                time_value = st.number_input(
+                    f"Enter time left before exam for Subject {s+1}",
                     min_value=1,
-                    max_value=5,
-                    value=3,
-                    key=f"weakness_{s}_{t}"
+                    value=7,
+                    step=1,
+                    key=f"time_value_{s}"
                 )
 
-            if topic_name:
-                topic_key = topic_name.lower()
-                if topic_key not in seen_topics:
-                    topics.append((topic_name, weakness_level))
-                    seen_topics.add(topic_key)
-
-        if subject_name:
-            subjects_data.append({
-                "subject_name": subject_name,
-                "days_left": days_left,
-                "topics": topics
-            })
-
-generate = st.button("Generate Smart Revision Plan", type="primary")
-
-# ---------------------------------
-# Results
-# ---------------------------------
-if generate:
-    if len(subjects_data) == 0:
-        st.error("Please enter at least one subject.")
-    else:
-        result = process_all_subjects(subjects_data)
-
-        if "error" in result:
-            st.error(result["error"])
-        else:
-            all_subject_results = result["all_subject_results"]
-            topic_df = flatten_topics(all_subject_results)
-            timetable_df = generate_study_timetable(topic_df)
-            today_focus = get_today_focus(topic_df)
-
-            total_topics = len(topic_df)
-            total_minutes = int(topic_df["Recommended Minutes"].sum()) if not topic_df.empty else 0
-            most_prioritized_subject = all_subject_results[0]["subject_name"]
-            weakest_topic_row = topic_df.sort_values(
-                by=["Weakness Level", "Recommended Minutes"],
-                ascending=[False, False]
-            ).iloc[0]
-            weakest_topic = f"{weakest_topic_row['Topic']} ({weakest_topic_row['Subject']})"
-            overall_readiness = int(sum(s["readiness_score"] for s in all_subject_results) / len(all_subject_results))
-
-            summary_values = {
-                "most_prioritized_subject": most_prioritized_subject,
-                "weakest_topic": weakest_topic,
-                "total_topics": total_topics,
-                "total_study_time": format_minutes(total_minutes),
-                "overall_readiness": overall_readiness
-            }
-
-            if overall_readiness >= 80 and show_fun_mode:
-                st.balloons()
-
-            st.success("Your smart revision plan has been generated.")
-
-            # top metrics
-            st.subheader("📊 Smart Summary Dashboard")
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Top Subject", shorten_text(most_prioritized_subject))
-            c2.metric("Weakest Topic", shorten_text(weakest_topic))
-            c3.metric("Total Topics", total_topics)
-            c4.metric("Study Time", format_minutes(total_minutes))
-            c5.metric("Readiness", f"{overall_readiness}%")
-
-            # mini polished section
-            st.markdown("<hr>", unsafe_allow_html=True)
-            mini1, mini2 = st.columns(2)
-
-            with mini1:
-                mood_text = get_study_mood(overall_readiness)
-                st.markdown(
-                    f"<div class='mini-card'><h4>🌷 Planner Status</h4><p>{mood_text}</p><p>Your current readiness is <b>{overall_readiness}%</b>.</p></div>",
-                    unsafe_allow_html=True
+            with col2:
+                time_unit = st.selectbox(
+                    f"Select time unit for Subject {s+1}",
+                    ["Day(s)", "Week(s)", "Month(s)"],
+                    key=f"time_unit_{s}"
                 )
 
-            with mini2:
-                if today_focus:
-                    st.markdown(
-                        f"<div class='mini-card'><h4>🎯 Today's Focus</h4><p><b>{today_focus['topic']}</b> — {today_focus['subject']}</p><p>Reason: {today_focus['reason']}</p></div>",
-                        unsafe_allow_html=True
+            days_left = convert_to_days(time_value, time_unit)
+
+            num_topics = st.number_input(
+                f"How many topics for Subject {s+1}?",
+                min_value=1,
+                max_value=10,
+                value=2,
+                step=1,
+                key=f"num_topics_{s}"
+            )
+
+            topics = []
+            seen_topics = set()
+
+            for t in range(num_topics):
+                st.markdown(f"**Topic {t+1}**")
+                topic_col1, topic_col2 = st.columns(2)
+
+                with topic_col1:
+                    topic_name = st.text_input(
+                        f"Enter topic {t+1} name",
+                        key=f"topic_name_{s}_{t}"
+                    ).strip()
+
+                with topic_col2:
+                    weakness_level = st.slider(
+                        f"Weakness level for Topic {t+1}",
+                        min_value=1,
+                        max_value=5,
+                        value=3,
+                        key=f"weakness_{s}_{t}"
                     )
 
-            # tabs
-            tab1, tab2, tab3, tab4 = st.tabs([
-                "🌟 Dashboard",
-                "📌 Subjects",
-                "🗓 Timetable",
-                "📥 Downloads"
-            ])
+                if topic_name:
+                    topic_key = topic_name.lower()
+                    if topic_key not in seen_topics:
+                        topics.append((topic_name, weakness_level))
+                        seen_topics.add(topic_key)
 
-            with tab1:
-                st.markdown("<div class='soft-box'><b>Overview</b></div>", unsafe_allow_html=True)
-                dash_col1, dash_col2 = st.columns(2)
+            if subject_name:
+                subjects_data.append({
+                    "subject_name": subject_name,
+                    "days_left": days_left,
+                    "topics": topics
+                })
 
-                with dash_col1:
-                    st.markdown("<div class='section-card'><b>Subject Priority Score</b></div>", unsafe_allow_html=True)
-                    subject_chart_df = pd.DataFrame([
-                        {"Subject": f"{s['subject_icon']} {s['subject_name']}", "Priority Score": s["subject_priority_score"]}
-                        for s in all_subject_results
-                    ])
-                    st.bar_chart(subject_chart_df.set_index("Subject"))
+    generate = st.button("Generate Smart Revision Plan", type="primary")
 
-                with dash_col2:
-                    st.markdown("<div class='section-card'><b>Topic Weakness Level</b></div>", unsafe_allow_html=True)
-                    weakness_chart_df = topic_df[["Topic", "Weakness Level"]].copy()
-                    st.bar_chart(weakness_chart_df.set_index("Topic"))
+    if generate:
+        if len(subjects_data) == 0:
+            st.error("Please enter at least one subject.")
+        else:
+            result = process_all_subjects(subjects_data)
+
+            if "error" in result:
+                st.error(result["error"])
+            else:
+                all_subject_results = result["all_subject_results"]
+                topic_df = flatten_topics(all_subject_results)
+                timetable_df = generate_study_timetable(topic_df)
+                today_focus = get_today_focus(topic_df)
+
+                total_topics = len(topic_df)
+                total_minutes = int(topic_df["Recommended Minutes"].sum()) if not topic_df.empty else 0
+                most_prioritized_subject = all_subject_results[0]["subject_name"]
+                weakest_topic_row = topic_df.sort_values(
+                    by=["Weakness Level", "Recommended Minutes"],
+                    ascending=[False, False]
+                ).iloc[0]
+                weakest_topic = f"{weakest_topic_row['Topic']} ({weakest_topic_row['Subject']})"
+                overall_readiness = int(sum(s["readiness_score"] for s in all_subject_results) / len(all_subject_results))
+
+                summary_values = {
+                    "most_prioritized_subject": most_prioritized_subject,
+                    "weakest_topic": weakest_topic,
+                    "total_topics": total_topics,
+                    "total_study_time": format_minutes(total_minutes),
+                    "overall_readiness": overall_readiness
+                }
+
+                if overall_readiness >= 80 and show_fun_mode:
+                    st.balloons()
+
+                st.success("Your smart revision plan has been generated.")
+
+                st.subheader("📊 Smart Summary Dashboard")
+                c1, c2, c3, c4, c5 = st.columns(5)
+                c1.metric("Top Subject", shorten_text(most_prioritized_subject))
+                c2.metric("Weakest Topic", shorten_text(weakest_topic))
+                c3.metric("Total Topics", total_topics)
+                c4.metric("Study Time", format_minutes(total_minutes))
+                c5.metric("Readiness", f"{overall_readiness}%")
 
                 st.markdown("<hr>", unsafe_allow_html=True)
+                mini1, mini2 = st.columns(2)
 
-                low1, low2 = st.columns(2)
-
-                with low1:
-                    st.markdown("<div class='section-card'><b>Workload by Subject</b></div>", unsafe_allow_html=True)
-                    workload_df = get_workload_by_subject(topic_df)
-                    st.bar_chart(workload_df.set_index("Subject"))
-
-                with low2:
-                    st.markdown("<div class='section-card'><b>Focus Distribution</b></div>", unsafe_allow_html=True)
-                    focus_df = get_focus_distribution(topic_df)
-                    st.bar_chart(focus_df.set_index("Category"))
-
-                st.markdown("<div class='cute-note'>💜 Little reminder: focus first on urgent + weak topics, then move to lighter recap topics.</div>", unsafe_allow_html=True)
-
-            with tab2:
-                st.subheader("📌 Ranked Revision Suggestions")
-
-                for i, subject in enumerate(all_subject_results, start=1):
-                    st.markdown("<div class='subject-card'>", unsafe_allow_html=True)
+                with mini1:
+                    mood_text = get_study_mood(overall_readiness)
                     st.markdown(
-                        f"## {subject['subject_icon']} Subject Rank {i}: {subject['subject_name']} "
-                        + get_priority_badge(subject["exam_priority"]),
+                        f"<div class='mini-card'><h4>🌷 Planner Status</h4><p>{mood_text}</p><p>Your current readiness is <b>{overall_readiness}%</b>.</p></div>",
                         unsafe_allow_html=True
                     )
 
-                    info1, info2, info3, info4, info5 = st.columns(5)
-                    info1.markdown(f"<div class='small-label'>Days Left</div><div class='big-value'>{subject['days_left']} day(s)</div>", unsafe_allow_html=True)
-                    info2.markdown(f"<div class='small-label'>Exam Priority</div><div class='big-value'>{subject['exam_priority']}</div>", unsafe_allow_html=True)
-                    info3.markdown(f"<div class='small-label'>Top Topic</div><div class='big-value'>{subject['most_prioritized_topic']}</div>", unsafe_allow_html=True)
-                    info4.markdown(f"<div class='small-label'>Readiness</div><div class='big-value'>{subject['readiness_score']}%</div>", unsafe_allow_html=True)
-                    info5.markdown(f"<div class='small-label'>Status</div><div class='big-value'>{subject['readiness_status']}</div>", unsafe_allow_html=True)
+                with mini2:
+                    if today_focus:
+                        st.markdown(
+                            f"<div class='mini-card'><h4>🎯 Today's Focus</h4><p><b>{today_focus['topic']}</b> — {today_focus['subject']}</p><p>Reason: {today_focus['reason']}</p></div>",
+                            unsafe_allow_html=True
+                        )
 
-                    if subject["exam_priority"] == "Very High":
-                        st.warning("This subject needs immediate attention.")
-                    elif subject["exam_priority"] == "High":
-                        st.info("This subject should be revised soon.")
-                    elif subject["exam_priority"] == "Medium":
-                        st.info("This subject needs balanced revision.")
+                tab1, tab2, tab3, tab4 = st.tabs([
+                    "🌟 Dashboard",
+                    "📌 Subjects",
+                    "🗓 Timetable",
+                    "📥 Downloads"
+                ])
+
+                with tab1:
+                    st.markdown("<div class='soft-box'><b>Overview</b></div>", unsafe_allow_html=True)
+                    dash_col1, dash_col2 = st.columns(2)
+
+                    with dash_col1:
+                        st.markdown("<div class='section-card'><b>Subject Priority Score</b></div>", unsafe_allow_html=True)
+                        subject_chart_df = pd.DataFrame([
+                            {"Subject": f"{s['subject_icon']} {s['subject_name']}", "Priority Score": s["subject_priority_score"]}
+                            for s in all_subject_results
+                        ])
+                        st.bar_chart(subject_chart_df.set_index("Subject"))
+
+                    with dash_col2:
+                        st.markdown("<div class='section-card'><b>Topic Weakness Level</b></div>", unsafe_allow_html=True)
+                        weakness_chart_df = topic_df[["Topic", "Weakness Level"]].copy()
+                        st.bar_chart(weakness_chart_df.set_index("Topic"))
+
+                    st.markdown("<hr>", unsafe_allow_html=True)
+
+                    low1, low2 = st.columns(2)
+
+                    with low1:
+                        st.markdown("<div class='section-card'><b>Workload by Subject</b></div>", unsafe_allow_html=True)
+                        workload_df = get_workload_by_subject(topic_df)
+                        st.bar_chart(workload_df.set_index("Subject"))
+
+                    with low2:
+                        st.markdown("<div class='section-card'><b>Focus Distribution</b></div>", unsafe_allow_html=True)
+                        focus_df = get_focus_distribution(topic_df)
+                        st.bar_chart(focus_df.set_index("Category"))
+
+                    st.markdown("<div class='cute-note'>💜 Little reminder: focus first on urgent + weak topics, then move to lighter recap topics.</div>", unsafe_allow_html=True)
+
+                with tab2:
+                    st.subheader("📌 Ranked Revision Suggestions")
+
+                    for i, subject in enumerate(all_subject_results, start=1):
+                        st.markdown("<div class='subject-card'>", unsafe_allow_html=True)
+                        st.markdown(
+                            f"## {subject['subject_icon']} Subject Rank {i}: {subject['subject_name']} "
+                            + get_priority_badge(subject["exam_priority"]),
+                            unsafe_allow_html=True
+                        )
+
+                        info1, info2, info3, info4, info5 = st.columns(5)
+                        info1.markdown(f"<div class='small-label'>Days Left</div><div class='big-value'>{subject['days_left']} day(s)</div>", unsafe_allow_html=True)
+                        info2.markdown(f"<div class='small-label'>Exam Priority</div><div class='big-value'>{subject['exam_priority']}</div>", unsafe_allow_html=True)
+                        info3.markdown(f"<div class='small-label'>Top Topic</div><div class='big-value'>{subject['most_prioritized_topic']}</div>", unsafe_allow_html=True)
+                        info4.markdown(f"<div class='small-label'>Readiness</div><div class='big-value'>{subject['readiness_score']}%</div>", unsafe_allow_html=True)
+                        info5.markdown(f"<div class='small-label'>Status</div><div class='big-value'>{subject['readiness_status']}</div>", unsafe_allow_html=True)
+
+                        if subject["exam_priority"] == "Very High":
+                            st.warning("This subject needs immediate attention.")
+                        elif subject["exam_priority"] == "High":
+                            st.info("This subject should be revised soon.")
+                        elif subject["exam_priority"] == "Medium":
+                            st.info("This subject needs balanced revision.")
+                        else:
+                            st.success("This subject is less urgent for now.")
+
+                        st.markdown("### Topic Suggestions")
+                        for j, topic in enumerate(subject["topic_suggestions"], start=1):
+                            with st.expander(f"Topic {j}: {topic['topic']}"):
+                                st.write(f"**Weakness Level:** {topic['weakness_level']}")
+                                st.progress(topic["weakness_level"] / 5)
+                                st.write(f"**Recommended Study Duration:** {format_minutes(topic['recommended_minutes'])}")
+                                st.write(f"**Study Method:** {topic['study_method']}")
+                                st.write(f"**Reminder:** {topic['reminder']}")
+                                st.write(f"**Suggestion:** {topic['suggestion']}")
+                                st.write(f"**Best Tip:** {topic['best_tip']}")
+
+                        st.markdown("</div>", unsafe_allow_html=True)
+
+                with tab3:
+                    st.subheader("🗓 Automatic Study Timetable")
+                    if timetable_df.empty:
+                        st.info("No timetable generated.")
                     else:
-                        st.success("This subject is less urgent for now.")
+                        st.dataframe(timetable_df, use_container_width=True, hide_index=True)
+                        st.markdown("<div class='section-card'><b>Timetable Notes</b></div>", unsafe_allow_html=True)
+                        st.caption("Each long topic is split into smaller sessions so the plan feels more realistic and less overwhelming.")
 
-                    st.markdown("### Topic Suggestions")
-                    for j, topic in enumerate(subject["topic_suggestions"], start=1):
-                        with st.expander(f"Topic {j}: {topic['topic']}"):
-                            st.write(f"**Weakness Level:** {topic['weakness_level']}")
-                            st.progress(topic["weakness_level"] / 5)
-                            st.write(f"**Recommended Study Duration:** {format_minutes(topic['recommended_minutes'])}")
-                            st.write(f"**Study Method:** {topic['study_method']}")
-                            st.write(f"**Reminder:** {topic['reminder']}")
-                            st.write(f"**Suggestion:** {topic['suggestion']}")
-                            st.write(f"**Best Tip:** {topic['best_tip']}")
+                        csv_data = timetable_df.to_csv(index=False).encode("utf-8")
+                        st.download_button(
+                            label="📥 Download Timetable (.csv)",
+                            data=csv_data,
+                            file_name="study_timetable.csv",
+                            mime="text/csv"
+                        )
 
-                    st.markdown("</div>", unsafe_allow_html=True)
+                with tab4:
+                    st.subheader("📥 Export Your Plan")
 
-            with tab3:
-                st.subheader("🗓 Automatic Study Timetable")
-                if timetable_df.empty:
-                    st.info("No timetable generated.")
-                else:
-                    st.dataframe(timetable_df, use_container_width=True, hide_index=True)
+                    if overall_readiness >= 80:
+                        feedback_text = "You're in a strong position. Stay consistent and keep revising smartly."
+                    elif overall_readiness >= 50:
+                        feedback_text = "You're doing okay, but some topics still need more focus."
+                    else:
+                        feedback_text = "Your exam is getting close, so focus on the weakest and most urgent topics first."
 
-                    st.markdown("<div class='section-card'><b>Timetable Notes</b></div>", unsafe_allow_html=True)
-                    st.caption("Each long topic is split into smaller sessions so the plan feels more realistic and less overwhelming.")
-
-                    csv_data = timetable_df.to_csv(index=False).encode("utf-8")
-                    st.download_button(
-                        label="📥 Download Timetable (.csv)",
-                        data=csv_data,
-                        file_name="study_timetable.csv",
-                        mime="text/csv"
+                    st.markdown(
+                        f"<div class='feedback-box'><b>Personalized Feedback:</b><br>{feedback_text}</div>",
+                        unsafe_allow_html=True
                     )
 
-            with tab4:
-                st.subheader("📥 Export Your Plan")
+                    st.markdown("<div class='download-card'><b>📄 PDF Version</b><br>Best for presentation, submission, or saving a polished final report.</div>", unsafe_allow_html=True)
+                    pdf_bytes = build_revision_pdf(all_subject_results, summary_values, timetable_df)
+                    st.download_button(
+                        label="📄 Download Styled Revision Plan (.pdf)",
+                        data=pdf_bytes,
+                        file_name="smart_revision_plan.pdf",
+                        mime="application/pdf"
+                    )
 
-                if overall_readiness >= 80:
-                    feedback_text = "You're in a strong position. Stay consistent and keep revising smartly."
-                elif overall_readiness >= 50:
-                    feedback_text = "You're doing okay, but some topics still need more focus."
-                else:
-                    feedback_text = "Your exam is getting close, so focus on the weakest and most urgent topics first."
+                    st.markdown("<div class='download-card'><b>📝 TXT Version</b><br>Best for simple quick notes or lightweight text reference.</div>", unsafe_allow_html=True)
+                    download_text = create_download_text(all_subject_results, summary_values, timetable_df)
+                    st.download_button(
+                        label="📝 Download Revision Plan (.txt)",
+                        data=download_text,
+                        file_name="smart_revision_plan.txt",
+                        mime="text/plain"
+                    )
 
-                st.markdown(
-                    f"<div class='feedback-box'><b>Personalized Feedback:</b><br>{feedback_text}</div>",
-                    unsafe_allow_html=True
-                )
+                    st.markdown("<div class='cute-note'>🎀 PDF is best for presentation or saving a pretty final revision report.</div>", unsafe_allow_html=True)
 
-                st.markdown("<div class='download-card'><b>📄 PDF Version</b><br>Best for presentation, submission, or saving a polished final report.</div>", unsafe_allow_html=True)
-                pdf_bytes = build_revision_pdf(all_subject_results, summary_values, timetable_df)
-                st.download_button(
-                    label="📄 Download Styled Revision Plan (.pdf)",
-                    data=pdf_bytes,
-                    file_name="smart_revision_plan.pdf",
-                    mime="application/pdf"
-                )
-
-                st.markdown("<div class='download-card'><b>📝 TXT Version</b><br>Best for simple quick notes or lightweight text reference.</div>", unsafe_allow_html=True)
-                download_text = create_download_text(all_subject_results, summary_values, timetable_df)
-                st.download_button(
-                    label="📝 Download Revision Plan (.txt)",
-                    data=download_text,
-                    file_name="smart_revision_plan.txt",
-                    mime="text/plain"
-                )
-
-                st.markdown("<div class='cute-note'>🎀 PDF is best for presentation or saving a pretty final revision report.</div>", unsafe_allow_html=True)
+# ---------------------------------
+# Run
+# ---------------------------------
+if not st.session_state.logged_in:
+    show_login()
+else:
+    show_app()
