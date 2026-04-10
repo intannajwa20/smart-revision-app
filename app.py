@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from io import StringIO, BytesIO
+from datetime import datetime
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -122,6 +123,20 @@ st.markdown("""
     border-left: 4px solid rgba(142,68,173,0.8);
     margin-top: 0.5rem;
 }
+.mini-card {
+    padding: 1rem;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    min-height: 120px;
+}
+.download-card {
+    padding: 1rem;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    margin-bottom: 0.8rem;
+}
 hr {
     border: none;
     border-top: 1px solid rgba(255,255,255,0.08);
@@ -153,6 +168,10 @@ def format_minutes(minutes):
         return f"{int(hours)} hour(s)"
     else:
         return f"{int(remaining_minutes)} minute(s)"
+
+
+def shorten_text(text, max_len=14):
+    return text if len(text) <= max_len else text[:max_len] + "..."
 
 
 def get_priority_details(days_left):
@@ -205,6 +224,17 @@ def get_readiness_status(score):
         return "Needs Work"
     else:
         return "Focus Now"
+
+
+def get_study_mood(score):
+    if score >= 80:
+        return "🌸 You’re in great shape"
+    elif score >= 60:
+        return "✨ You’re getting there"
+    elif score >= 40:
+        return "🫧 You need a stronger push"
+    else:
+        return "⚡ Time to lock in"
 
 
 def get_priority_badge(priority):
@@ -385,10 +415,27 @@ def get_workload_by_subject(topic_df):
     return out.sort_values("Recommended Minutes", ascending=False)
 
 
+def get_today_focus(topic_df):
+    if topic_df.empty:
+        return None
+
+    top = topic_df.sort_values(
+        by=["Days Left", "Weakness Level", "Recommended Minutes"],
+        ascending=[True, False, False]
+    ).iloc[0]
+
+    return {
+        "subject": top["Subject"],
+        "topic": top["Topic"],
+        "reason": "High weakness and closer exam date."
+    }
+
+
 def create_download_text(all_subject_results, summary_values, timetable_df):
     output = StringIO()
     output.write("SMART REVISION PLAN\n")
     output.write("=" * 50 + "\n\n")
+    output.write(f"Generated Date: {datetime.now().strftime('%d %B %Y')}\n")
     output.write(f"Most Prioritized Subject: {summary_values['most_prioritized_subject']}\n")
     output.write(f"Weakest Topic Overall: {summary_values['weakest_topic']}\n")
     output.write(f"Total Topics: {summary_values['total_topics']}\n")
@@ -537,7 +584,6 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
 
     story = []
 
-    # cover section
     story.append(Spacer(1, 28))
     story.append(Paragraph("Smart Revision Planner", title_style))
     story.append(Paragraph(
@@ -547,6 +593,7 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
     story.append(Spacer(1, 18))
 
     cover_table = Table([
+        ["Generated Date", datetime.now().strftime("%d %B %Y")],
         ["Top Subject", summary_values["most_prioritized_subject"]],
         ["Weakest Topic", summary_values["weakest_topic"]],
         ["Total Topics", str(summary_values["total_topics"])],
@@ -809,6 +856,7 @@ if generate:
             all_subject_results = result["all_subject_results"]
             topic_df = flatten_topics(all_subject_results)
             timetable_df = generate_study_timetable(topic_df)
+            today_focus = get_today_focus(topic_df)
 
             total_topics = len(topic_df)
             total_minutes = int(topic_df["Recommended Minutes"].sum()) if not topic_df.empty else 0
@@ -836,11 +884,29 @@ if generate:
             # top metrics
             st.subheader("📊 Smart Summary Dashboard")
             c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Top Subject", most_prioritized_subject)
-            c2.metric("Weakest Topic", weakest_topic)
+            c1.metric("Top Subject", shorten_text(most_prioritized_subject))
+            c2.metric("Weakest Topic", shorten_text(weakest_topic))
             c3.metric("Total Topics", total_topics)
             c4.metric("Study Time", format_minutes(total_minutes))
             c5.metric("Readiness", f"{overall_readiness}%")
+
+            # mini polished section
+            st.markdown("<hr>", unsafe_allow_html=True)
+            mini1, mini2 = st.columns(2)
+
+            with mini1:
+                mood_text = get_study_mood(overall_readiness)
+                st.markdown(
+                    f"<div class='mini-card'><h4>🌷 Planner Status</h4><p>{mood_text}</p><p>Your current readiness is <b>{overall_readiness}%</b>.</p></div>",
+                    unsafe_allow_html=True
+                )
+
+            with mini2:
+                if today_focus:
+                    st.markdown(
+                        f"<div class='mini-card'><h4>🎯 Today's Focus</h4><p><b>{today_focus['topic']}</b> — {today_focus['subject']}</p><p>Reason: {today_focus['reason']}</p></div>",
+                        unsafe_allow_html=True
+                    )
 
             # tabs
             tab1, tab2, tab3, tab4 = st.tabs([
@@ -956,24 +1022,22 @@ if generate:
                     unsafe_allow_html=True
                 )
 
-                download_text = create_download_text(all_subject_results, summary_values, timetable_df)
+                st.markdown("<div class='download-card'><b>📄 PDF Version</b><br>Best for presentation, submission, or saving a polished final report.</div>", unsafe_allow_html=True)
                 pdf_bytes = build_revision_pdf(all_subject_results, summary_values, timetable_df)
+                st.download_button(
+                    label="📄 Download Styled Revision Plan (.pdf)",
+                    data=pdf_bytes,
+                    file_name="smart_revision_plan.pdf",
+                    mime="application/pdf"
+                )
 
-                dl1, dl2 = st.columns(2)
-                with dl1:
-                    st.download_button(
-                        label="📄 Download Styled Revision Plan (.pdf)",
-                        data=pdf_bytes,
-                        file_name="smart_revision_plan.pdf",
-                        mime="application/pdf"
-                    )
-
-                with dl2:
-                    st.download_button(
-                        label="📝 Download Revision Plan (.txt)",
-                        data=download_text,
-                        file_name="smart_revision_plan.txt",
-                        mime="text/plain"
-                    )
+                st.markdown("<div class='download-card'><b>📝 TXT Version</b><br>Best for simple quick notes or lightweight text reference.</div>", unsafe_allow_html=True)
+                download_text = create_download_text(all_subject_results, summary_values, timetable_df)
+                st.download_button(
+                    label="📝 Download Revision Plan (.txt)",
+                    data=download_text,
+                    file_name="smart_revision_plan.txt",
+                    mime="text/plain"
+                )
 
                 st.markdown("<div class='cute-note'>🎀 PDF is best for presentation or saving a pretty final revision report.</div>", unsafe_allow_html=True)
