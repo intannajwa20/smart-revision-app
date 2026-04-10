@@ -1,6 +1,16 @@
 import streamlit as st
 import pandas as pd
-from io import StringIO
+from io import StringIO, BytesIO
+
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    PageBreak
+)
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.units import mm
 
 # ---------------------------------
 # Page config
@@ -370,6 +380,213 @@ def load_sample_data():
         }
     ]
 
+# ---------------------------------
+# PDF generation
+# ---------------------------------
+def draw_pdf_background(canvas, doc):
+    width, height = A4
+
+    # dark background
+    canvas.saveState()
+    canvas.setFillColor(colors.HexColor("#0B1020"))
+    canvas.rect(0, 0, width, height, fill=1, stroke=0)
+
+    # top banner
+    canvas.setFillColor(colors.HexColor("#6C3BB8"))
+    canvas.rect(0, height - 55, width, 55, fill=1, stroke=0)
+
+    # bottom accent line
+    canvas.setFillColor(colors.HexColor("#8E44AD"))
+    canvas.rect(0, 0, width, 12, fill=1, stroke=0)
+
+    canvas.restoreState()
+
+
+def build_revision_pdf(all_subject_results, summary_values, timetable_df):
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=18 * mm,
+        leftMargin=18 * mm,
+        topMargin=20 * mm,
+        bottomMargin=18 * mm
+    )
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "TitleStyle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=22,
+        leading=28,
+        alignment=TA_CENTER,
+        textColor=colors.whitesmoke,
+        spaceAfter=10
+    )
+
+    subtitle_style = ParagraphStyle(
+        "SubtitleStyle",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=10,
+        leading=14,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#D7D7E8"),
+        spaceAfter=18
+    )
+
+    heading_style = ParagraphStyle(
+        "HeadingStyle",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=14,
+        leading=18,
+        textColor=colors.HexColor("#EAD9FF"),
+        spaceBefore=10,
+        spaceAfter=8
+    )
+
+    body_style = ParagraphStyle(
+        "BodyStyle",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=10,
+        leading=14,
+        textColor=colors.whitesmoke,
+        alignment=TA_LEFT
+    )
+
+    small_style = ParagraphStyle(
+        "SmallStyle",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#EAEAF2"),
+        alignment=TA_LEFT
+    )
+
+    story = []
+
+    story.append(Spacer(1, 20))
+    story.append(Paragraph("Smart Revision Planner", title_style))
+    story.append(Paragraph(
+        "Personalized revision summary, ranked subjects, and day-by-day study schedule.",
+        subtitle_style
+    ))
+
+    story.append(Paragraph("Summary Dashboard", heading_style))
+
+    summary_data = [
+        ["Top Subject", summary_values["most_prioritized_subject"]],
+        ["Weakest Topic", summary_values["weakest_topic"]],
+        ["Total Topics", str(summary_values["total_topics"])],
+        ["Total Study Time", summary_values["total_study_time"]],
+        ["Overall Readiness", f"{summary_values['overall_readiness']}%"],
+    ]
+
+    summary_table = Table(summary_data, colWidths=[55 * mm, 105 * mm])
+    summary_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#131A2E")),
+        ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#8E44AD")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#3B3554")),
+        ("TEXTCOLOR", (0, 0), (-1, -1), colors.whitesmoke),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 14))
+
+    story.append(Paragraph("Ranked Subject Review", heading_style))
+
+    for i, subject in enumerate(all_subject_results, start=1):
+        subject_title = (
+            f"<b>Subject Rank {i}: {subject['subject_name']}</b><br/>"
+            f"Priority: {subject['exam_priority']} | "
+            f"Top Topic: {subject['most_prioritized_topic']} | "
+            f"Readiness: {subject['readiness_score']}% ({subject['readiness_status']})"
+        )
+        story.append(Paragraph(subject_title, body_style))
+        story.append(Spacer(1, 5))
+
+        topic_rows = [["Topic", "Weakness", "Duration", "Method"]]
+        for topic in subject["topic_suggestions"]:
+            topic_rows.append([
+                topic["topic"],
+                str(topic["weakness_level"]),
+                format_minutes(topic["recommended_minutes"]),
+                topic["study_method"]
+            ])
+
+        topic_table = Table(topic_rows, colWidths=[45 * mm, 20 * mm, 35 * mm, 70 * mm])
+        topic_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#6C3BB8")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#131A2E")),
+            ("TEXTCOLOR", (0, 1), (-1, -1), colors.whitesmoke),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#40395E")),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 7),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ]))
+        story.append(topic_table)
+        story.append(Spacer(1, 12))
+
+    story.append(PageBreak())
+    story.append(Spacer(1, 12))
+    story.append(Paragraph("Automatic Study Timetable", heading_style))
+
+    if timetable_df.empty:
+        story.append(Paragraph("No timetable generated.", body_style))
+    else:
+        timetable_rows = [["Day", "Subject", "Topic", "Duration", "Method"]]
+        for _, row in timetable_df.iterrows():
+            timetable_rows.append([
+                row["Day"],
+                row["Subject"],
+                row["Topic"],
+                row["Study Duration"],
+                row["Study Method"]
+            ])
+
+        timetable_table = Table(
+            timetable_rows,
+            colWidths=[20 * mm, 35 * mm, 40 * mm, 30 * mm, 55 * mm],
+            repeatRows=1
+        )
+        timetable_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#6C3BB8")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#131A2E")),
+            ("TEXTCOLOR", (0, 1), (-1, -1), colors.whitesmoke),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#40395E")),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(timetable_table)
+
+    story.append(Spacer(1, 16))
+    story.append(Paragraph(
+        "Generated by Smart Revision Planner",
+        small_style
+    ))
+
+    doc.build(story, onFirstPage=draw_pdf_background, onLaterPages=draw_pdf_background)
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf
 
 # ---------------------------------
 # Hero section
@@ -616,12 +833,23 @@ if generate:
                 unsafe_allow_html=True
             )
 
-            # Download
+            # Downloads
             download_text = create_download_text(all_subject_results, summary_values, timetable_df)
+            pdf_bytes = build_revision_pdf(all_subject_results, summary_values, timetable_df)
 
-            st.download_button(
-                label="📥 Download Revision Plan",
-                data=download_text,
-                file_name="smart_revision_plan.txt",
-                mime="text/plain"
-            )
+            dl1, dl2 = st.columns(2)
+            with dl1:
+                st.download_button(
+                    label="📥 Download Revision Plan (.txt)",
+                    data=download_text,
+                    file_name="smart_revision_plan.txt",
+                    mime="text/plain"
+                )
+
+            with dl2:
+                st.download_button(
+                    label="📄 Download Styled Revision Plan (.pdf)",
+                    data=pdf_bytes,
+                    file_name="smart_revision_plan.pdf",
+                    mime="application/pdf"
+                )
