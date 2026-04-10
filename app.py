@@ -26,22 +26,30 @@ st.set_page_config(
 # ---------------------------------
 st.markdown("""
 <style>
+.block-container {
+    padding-top: 1.4rem;
+    padding-bottom: 2rem;
+}
 .main-title {
-    font-size: 2.8rem;
+    font-size: 3rem;
     font-weight: 800;
     margin-bottom: 0.2rem;
+    line-height: 1.1;
 }
 .subtitle {
-    font-size: 1.05rem;
-    color: #cfcfcf;
-    margin-bottom: 1.2rem;
+    font-size: 1.02rem;
+    color: #d6d1e6;
+    margin-bottom: 1rem;
 }
 .hero-box {
-    padding: 1.4rem 1.6rem;
-    border-radius: 20px;
-    background: linear-gradient(135deg, rgba(142,68,173,0.25), rgba(20,20,35,0.95));
+    padding: 1.5rem 1.7rem;
+    border-radius: 24px;
+    background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.10), transparent 28%),
+        linear-gradient(135deg, rgba(142,68,173,0.30), rgba(20,20,35,0.96));
     border: 1px solid rgba(255,255,255,0.08);
     margin-bottom: 1.2rem;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.18);
 }
 .section-card {
     padding: 1rem 1.2rem;
@@ -51,20 +59,34 @@ st.markdown("""
     margin-bottom: 1rem;
 }
 .small-label {
-    font-size: 0.88rem;
-    color: #b8b8b8;
-    margin-bottom: 0.25rem;
+    font-size: 0.85rem;
+    color: #bbb6cc;
+    margin-bottom: 0.2rem;
 }
 .big-value {
-    font-size: 1.2rem;
+    font-size: 1.15rem;
     font-weight: 700;
 }
 .subject-card {
-    padding: 1.2rem;
+    padding: 1.15rem;
     border-radius: 18px;
     background: rgba(255,255,255,0.025);
     border: 1px solid rgba(255,255,255,0.07);
-    margin-bottom: 1.1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.10);
+}
+.soft-box {
+    padding: 0.95rem 1rem;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+}
+.feedback-box {
+    padding: 1rem 1.2rem;
+    border-radius: 16px;
+    background: rgba(142,68,173,0.12);
+    border: 1px solid rgba(142,68,173,0.28);
+    margin-top: 0.5rem;
 }
 .tag-high {
     display: inline-block;
@@ -93,11 +115,11 @@ st.markdown("""
     background: rgba(75, 192, 192, 0.12);
     border: 1px solid rgba(75, 192, 192, 0.28);
 }
-.feedback-box {
-    padding: 1rem 1.2rem;
-    border-radius: 16px;
-    background: rgba(142,68,173,0.12);
-    border: 1px solid rgba(142,68,173,0.28);
+.cute-note {
+    padding: 0.75rem 0.95rem;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.03);
+    border-left: 4px solid rgba(142,68,173,0.8);
     margin-top: 0.5rem;
 }
 hr {
@@ -194,6 +216,23 @@ def get_priority_badge(priority):
         return '<span class="tag-low">Manageable</span>'
 
 
+def get_subject_icon(subject_name):
+    name = subject_name.lower()
+    if "data" in name:
+        return "📊"
+    if "database" in name or "sql" in name:
+        return "🗂️"
+    if "ai" in name or "artificial" in name or "neural" in name:
+        return "🤖"
+    if "math" in name or "statistics" in name or "calc" in name:
+        return "🧮"
+    if "program" in name or "coding" in name or "python" in name:
+        return "💻"
+    if "network" in name or "security" in name:
+        return "🌐"
+    return "📘"
+
+
 def process_subject(subject_name, days_left, topics):
     if days_left <= 0:
         return {"error": f"Time left for subject '{subject_name}' must be greater than 0."}
@@ -243,6 +282,7 @@ def process_subject(subject_name, days_left, topics):
 
     return {
         "subject_name": subject_name,
+        "subject_icon": get_subject_icon(subject_name),
         "days_left": days_left,
         "exam_priority": exam_priority,
         "subject_priority_score": subject_priority_score,
@@ -320,6 +360,31 @@ def generate_study_timetable(topic_df):
     return pd.DataFrame(timetable_rows)
 
 
+def get_focus_distribution(topic_df):
+    if topic_df.empty:
+        return pd.DataFrame(columns=["Category", "Count"])
+
+    def classify(w):
+        if w >= 4:
+            return "High Focus"
+        elif w == 3:
+            return "Moderate Focus"
+        return "Light Review"
+
+    df = topic_df.copy()
+    df["Category"] = df["Weakness Level"].apply(classify)
+    out = df["Category"].value_counts().rename_axis("Category").reset_index(name="Count")
+    return out
+
+
+def get_workload_by_subject(topic_df):
+    if topic_df.empty:
+        return pd.DataFrame(columns=["Subject", "Recommended Minutes"])
+
+    out = topic_df.groupby("Subject", as_index=False)["Recommended Minutes"].sum()
+    return out.sort_values("Recommended Minutes", ascending=False)
+
+
 def create_download_text(all_subject_results, summary_values, timetable_df):
     output = StringIO()
     output.write("SMART REVISION PLAN\n")
@@ -385,19 +450,20 @@ def load_sample_data():
 # ---------------------------------
 def draw_pdf_background(canvas, doc):
     width, height = A4
-
-    # dark background
     canvas.saveState()
+
     canvas.setFillColor(colors.HexColor("#0B1020"))
     canvas.rect(0, 0, width, height, fill=1, stroke=0)
 
-    # top banner
     canvas.setFillColor(colors.HexColor("#6C3BB8"))
-    canvas.rect(0, height - 55, width, 55, fill=1, stroke=0)
+    canvas.rect(0, height - 70, width, 70, fill=1, stroke=0)
 
-    # bottom accent line
     canvas.setFillColor(colors.HexColor("#8E44AD"))
     canvas.rect(0, 0, width, 12, fill=1, stroke=0)
+
+    canvas.setFillColor(colors.whitesmoke)
+    canvas.setFont("Helvetica-Bold", 10)
+    canvas.drawRightString(width - 18 * mm, 8 * mm, f"Page {doc.page}")
 
     canvas.restoreState()
 
@@ -410,7 +476,7 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
         pagesize=A4,
         rightMargin=18 * mm,
         leftMargin=18 * mm,
-        topMargin=20 * mm,
+        topMargin=22 * mm,
         bottomMargin=18 * mm
     )
 
@@ -420,8 +486,8 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
         "TitleStyle",
         parent=styles["Title"],
         fontName="Helvetica-Bold",
-        fontSize=22,
-        leading=28,
+        fontSize=24,
+        leading=30,
         alignment=TA_CENTER,
         textColor=colors.whitesmoke,
         spaceAfter=10
@@ -431,10 +497,10 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
         "SubtitleStyle",
         parent=styles["Normal"],
         fontName="Helvetica",
-        fontSize=10,
-        leading=14,
+        fontSize=10.5,
+        leading=15,
         alignment=TA_CENTER,
-        textColor=colors.HexColor("#D7D7E8"),
+        textColor=colors.HexColor("#E3D9F7"),
         spaceAfter=18
     )
 
@@ -444,7 +510,7 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
         fontName="Helvetica-Bold",
         fontSize=14,
         leading=18,
-        textColor=colors.HexColor("#EAD9FF"),
+        textColor=colors.HexColor("#F0E4FF"),
         spaceBefore=10,
         spaceAfter=8
     )
@@ -471,44 +537,44 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
 
     story = []
 
-    story.append(Spacer(1, 20))
+    # cover section
+    story.append(Spacer(1, 28))
     story.append(Paragraph("Smart Revision Planner", title_style))
     story.append(Paragraph(
-        "Personalized revision summary, ranked subjects, and day-by-day study schedule.",
+        "A personalized revision report with ranked subjects, study priorities, and a day-by-day timetable.",
         subtitle_style
     ))
+    story.append(Spacer(1, 18))
 
-    story.append(Paragraph("Summary Dashboard", heading_style))
-
-    summary_data = [
+    cover_table = Table([
         ["Top Subject", summary_values["most_prioritized_subject"]],
         ["Weakest Topic", summary_values["weakest_topic"]],
         ["Total Topics", str(summary_values["total_topics"])],
         ["Total Study Time", summary_values["total_study_time"]],
         ["Overall Readiness", f"{summary_values['overall_readiness']}%"],
-    ]
+    ], colWidths=[55 * mm, 105 * mm])
 
-    summary_table = Table(summary_data, colWidths=[55 * mm, 105 * mm])
-    summary_table.setStyle(TableStyle([
+    cover_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#131A2E")),
         ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#8E44AD")),
-        ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#3B3554")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#40395E")),
         ("TEXTCOLOR", (0, 0), (-1, -1), colors.whitesmoke),
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
         ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
         ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 8),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
     ]))
-    story.append(summary_table)
-    story.append(Spacer(1, 14))
+    story.append(cover_table)
+    story.append(Spacer(1, 20))
+    story.append(Paragraph("Generated by Smart Revision Planner", small_style))
+    story.append(PageBreak())
 
     story.append(Paragraph("Ranked Subject Review", heading_style))
 
     for i, subject in enumerate(all_subject_results, start=1):
         subject_title = (
-            f"<b>Subject Rank {i}: {subject['subject_name']}</b><br/>"
+            f"<b>{subject['subject_icon']} Subject Rank {i}: {subject['subject_name']}</b><br/>"
             f"Priority: {subject['exam_priority']} | "
             f"Top Topic: {subject['most_prioritized_topic']} | "
             f"Readiness: {subject['readiness_score']}% ({subject['readiness_status']})"
@@ -542,7 +608,6 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
         story.append(Spacer(1, 12))
 
     story.append(PageBreak())
-    story.append(Spacer(1, 12))
     story.append(Paragraph("Automatic Study Timetable", heading_style))
 
     if timetable_df.empty:
@@ -578,15 +643,37 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
         story.append(timetable_table)
 
     story.append(Spacer(1, 16))
-    story.append(Paragraph(
-        "Generated by Smart Revision Planner",
-        small_style
-    ))
+    story.append(Paragraph("Stay consistent. Small progress still counts.", small_style))
 
     doc.build(story, onFirstPage=draw_pdf_background, onLaterPages=draw_pdf_background)
     pdf = buffer.getvalue()
     buffer.close()
     return pdf
+
+
+# ---------------------------------
+# Sidebar
+# ---------------------------------
+with st.sidebar:
+    st.markdown("## 🌙 Planner Panel")
+    st.write("A soft, smarter revision helper for students.")
+    st.markdown("""
+**What this app does**
+- ranks your subjects
+- detects weakest topics
+- estimates study time
+- creates a study timetable
+- exports TXT, CSV, and PDF
+""")
+    st.markdown("---")
+    st.markdown("### ✨ Cute focus tips")
+    st.caption("Start with the hardest topic first.")
+    st.caption("Short sessions are still productive.")
+    st.caption("Consistency beats panic revision.")
+    st.markdown("---")
+    st.markdown("### 🎀 Best use")
+    st.caption("Use 2–5 subjects for the cleanest output.")
+    st.caption("Keep topic names short and clear.")
 
 # ---------------------------------
 # Hero section
@@ -596,7 +683,7 @@ st.markdown("""
     <div class="main-title">📚 Smart Revision Planner</div>
     <div class="subtitle">
         Plan your study smarter based on exam time, topic weakness, and subject priority.
-        Get a clearer dashboard, stronger recommendations, and a day-by-day revision direction.
+        Now with a prettier dashboard, cute touches, a styled PDF report, and clearer study flow.
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -604,12 +691,15 @@ st.markdown("""
 # ---------------------------------
 # Controls
 # ---------------------------------
-top_col1, top_col2 = st.columns([1, 1])
+top_col1, top_col2, top_col3 = st.columns([1, 1, 1])
 
 with top_col1:
     use_sample = st.checkbox("Load sample demo data")
 
 with top_col2:
+    show_fun_mode = st.checkbox("Cute mode visuals", value=True)
+
+with top_col3:
     if st.button("Reset Form"):
         st.rerun()
 
@@ -738,9 +828,12 @@ if generate:
                 "overall_readiness": overall_readiness
             }
 
+            if overall_readiness >= 80 and show_fun_mode:
+                st.balloons()
+
             st.success("Your smart revision plan has been generated.")
 
-            # Summary dashboard
+            # top metrics
             st.subheader("📊 Smart Summary Dashboard")
             c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("Top Subject", most_prioritized_subject)
@@ -749,107 +842,138 @@ if generate:
             c4.metric("Study Time", format_minutes(total_minutes))
             c5.metric("Readiness", f"{overall_readiness}%")
 
-            st.markdown("<hr>", unsafe_allow_html=True)
+            # tabs
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "🌟 Dashboard",
+                "📌 Subjects",
+                "🗓 Timetable",
+                "📥 Downloads"
+            ])
 
-            # Visual analytics
-            st.subheader("📈 Visual Analytics")
-            chart_col1, chart_col2 = st.columns(2)
+            with tab1:
+                st.markdown("<div class='soft-box'><b>Overview</b></div>", unsafe_allow_html=True)
+                dash_col1, dash_col2 = st.columns(2)
 
-            with chart_col1:
-                st.markdown("<div class='section-card'><b>Subject Priority Score</b></div>", unsafe_allow_html=True)
-                subject_chart_df = pd.DataFrame([
-                    {"Subject": s["subject_name"], "Priority Score": s["subject_priority_score"]}
-                    for s in all_subject_results
-                ])
-                st.bar_chart(subject_chart_df.set_index("Subject"))
+                with dash_col1:
+                    st.markdown("<div class='section-card'><b>Subject Priority Score</b></div>", unsafe_allow_html=True)
+                    subject_chart_df = pd.DataFrame([
+                        {"Subject": f"{s['subject_icon']} {s['subject_name']}", "Priority Score": s["subject_priority_score"]}
+                        for s in all_subject_results
+                    ])
+                    st.bar_chart(subject_chart_df.set_index("Subject"))
 
-            with chart_col2:
-                st.markdown("<div class='section-card'><b>Topic Weakness Level</b></div>", unsafe_allow_html=True)
-                weakness_chart_df = topic_df[["Topic", "Weakness Level"]].copy()
-                st.bar_chart(weakness_chart_df.set_index("Topic"))
+                with dash_col2:
+                    st.markdown("<div class='section-card'><b>Topic Weakness Level</b></div>", unsafe_allow_html=True)
+                    weakness_chart_df = topic_df[["Topic", "Weakness Level"]].copy()
+                    st.bar_chart(weakness_chart_df.set_index("Topic"))
 
-            st.markdown("<hr>", unsafe_allow_html=True)
+                st.markdown("<hr>", unsafe_allow_html=True)
 
-            # Ranked subjects
-            st.subheader("📌 Ranked Revision Suggestions")
+                low1, low2 = st.columns(2)
 
-            for i, subject in enumerate(all_subject_results, start=1):
-                st.markdown("<div class='subject-card'>", unsafe_allow_html=True)
+                with low1:
+                    st.markdown("<div class='section-card'><b>Workload by Subject</b></div>", unsafe_allow_html=True)
+                    workload_df = get_workload_by_subject(topic_df)
+                    st.bar_chart(workload_df.set_index("Subject"))
+
+                with low2:
+                    st.markdown("<div class='section-card'><b>Focus Distribution</b></div>", unsafe_allow_html=True)
+                    focus_df = get_focus_distribution(topic_df)
+                    st.bar_chart(focus_df.set_index("Category"))
+
+                st.markdown("<div class='cute-note'>💜 Little reminder: focus first on urgent + weak topics, then move to lighter recap topics.</div>", unsafe_allow_html=True)
+
+            with tab2:
+                st.subheader("📌 Ranked Revision Suggestions")
+
+                for i, subject in enumerate(all_subject_results, start=1):
+                    st.markdown("<div class='subject-card'>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"## {subject['subject_icon']} Subject Rank {i}: {subject['subject_name']} "
+                        + get_priority_badge(subject["exam_priority"]),
+                        unsafe_allow_html=True
+                    )
+
+                    info1, info2, info3, info4, info5 = st.columns(5)
+                    info1.markdown(f"<div class='small-label'>Days Left</div><div class='big-value'>{subject['days_left']} day(s)</div>", unsafe_allow_html=True)
+                    info2.markdown(f"<div class='small-label'>Exam Priority</div><div class='big-value'>{subject['exam_priority']}</div>", unsafe_allow_html=True)
+                    info3.markdown(f"<div class='small-label'>Top Topic</div><div class='big-value'>{subject['most_prioritized_topic']}</div>", unsafe_allow_html=True)
+                    info4.markdown(f"<div class='small-label'>Readiness</div><div class='big-value'>{subject['readiness_score']}%</div>", unsafe_allow_html=True)
+                    info5.markdown(f"<div class='small-label'>Status</div><div class='big-value'>{subject['readiness_status']}</div>", unsafe_allow_html=True)
+
+                    if subject["exam_priority"] == "Very High":
+                        st.warning("This subject needs immediate attention.")
+                    elif subject["exam_priority"] == "High":
+                        st.info("This subject should be revised soon.")
+                    elif subject["exam_priority"] == "Medium":
+                        st.info("This subject needs balanced revision.")
+                    else:
+                        st.success("This subject is less urgent for now.")
+
+                    st.markdown("### Topic Suggestions")
+                    for j, topic in enumerate(subject["topic_suggestions"], start=1):
+                        with st.expander(f"Topic {j}: {topic['topic']}"):
+                            st.write(f"**Weakness Level:** {topic['weakness_level']}")
+                            st.progress(topic["weakness_level"] / 5)
+                            st.write(f"**Recommended Study Duration:** {format_minutes(topic['recommended_minutes'])}")
+                            st.write(f"**Study Method:** {topic['study_method']}")
+                            st.write(f"**Reminder:** {topic['reminder']}")
+                            st.write(f"**Suggestion:** {topic['suggestion']}")
+                            st.write(f"**Best Tip:** {topic['best_tip']}")
+
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+            with tab3:
+                st.subheader("🗓 Automatic Study Timetable")
+                if timetable_df.empty:
+                    st.info("No timetable generated.")
+                else:
+                    st.dataframe(timetable_df, use_container_width=True, hide_index=True)
+
+                    st.markdown("<div class='section-card'><b>Timetable Notes</b></div>", unsafe_allow_html=True)
+                    st.caption("Each long topic is split into smaller sessions so the plan feels more realistic and less overwhelming.")
+
+                    csv_data = timetable_df.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        label="📥 Download Timetable (.csv)",
+                        data=csv_data,
+                        file_name="study_timetable.csv",
+                        mime="text/csv"
+                    )
+
+            with tab4:
+                st.subheader("📥 Export Your Plan")
+
+                if overall_readiness >= 80:
+                    feedback_text = "You're in a strong position. Stay consistent and keep revising smartly."
+                elif overall_readiness >= 50:
+                    feedback_text = "You're doing okay, but some topics still need more focus."
+                else:
+                    feedback_text = "Your exam is getting close, so focus on the weakest and most urgent topics first."
+
                 st.markdown(
-                    f"## Subject Rank {i}: {subject['subject_name']} "
-                    + get_priority_badge(subject["exam_priority"]),
+                    f"<div class='feedback-box'><b>Personalized Feedback:</b><br>{feedback_text}</div>",
                     unsafe_allow_html=True
                 )
 
-                info1, info2, info3, info4, info5 = st.columns(5)
-                info1.markdown(f"<div class='small-label'>Days Left</div><div class='big-value'>{subject['days_left']} day(s)</div>", unsafe_allow_html=True)
-                info2.markdown(f"<div class='small-label'>Exam Priority</div><div class='big-value'>{subject['exam_priority']}</div>", unsafe_allow_html=True)
-                info3.markdown(f"<div class='small-label'>Top Topic</div><div class='big-value'>{subject['most_prioritized_topic']}</div>", unsafe_allow_html=True)
-                info4.markdown(f"<div class='small-label'>Readiness</div><div class='big-value'>{subject['readiness_score']}%</div>", unsafe_allow_html=True)
-                info5.markdown(f"<div class='small-label'>Status</div><div class='big-value'>{subject['readiness_status']}</div>", unsafe_allow_html=True)
+                download_text = create_download_text(all_subject_results, summary_values, timetable_df)
+                pdf_bytes = build_revision_pdf(all_subject_results, summary_values, timetable_df)
 
-                if subject["exam_priority"] == "Very High":
-                    st.warning("This subject needs immediate attention.")
-                elif subject["exam_priority"] == "High":
-                    st.info("This subject should be revised soon.")
-                elif subject["exam_priority"] == "Medium":
-                    st.info("This subject needs balanced revision.")
-                else:
-                    st.success("This subject is less urgent for now.")
+                dl1, dl2 = st.columns(2)
+                with dl1:
+                    st.download_button(
+                        label="📄 Download Styled Revision Plan (.pdf)",
+                        data=pdf_bytes,
+                        file_name="smart_revision_plan.pdf",
+                        mime="application/pdf"
+                    )
 
-                st.markdown("### Topic Suggestions")
-                for j, topic in enumerate(subject["topic_suggestions"], start=1):
-                    with st.expander(f"Topic {j}: {topic['topic']}"):
-                        st.write(f"**Weakness Level:** {topic['weakness_level']}")
-                        st.progress(topic["weakness_level"] / 5)
-                        st.write(f"**Recommended Study Duration:** {format_minutes(topic['recommended_minutes'])}")
-                        st.write(f"**Study Method:** {topic['study_method']}")
-                        st.write(f"**Reminder:** {topic['reminder']}")
-                        st.write(f"**Suggestion:** {topic['suggestion']}")
-                        st.write(f"**Best Tip:** {topic['best_tip']}")
+                with dl2:
+                    st.download_button(
+                        label="📝 Download Revision Plan (.txt)",
+                        data=download_text,
+                        file_name="smart_revision_plan.txt",
+                        mime="text/plain"
+                    )
 
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            st.markdown("<hr>", unsafe_allow_html=True)
-
-            # Timetable
-            st.subheader("🗓 Automatic Study Timetable")
-            if timetable_df.empty:
-                st.info("No timetable generated.")
-            else:
-                st.dataframe(timetable_df, use_container_width=True, hide_index=True)
-
-            # Feedback
-            st.subheader("💡 Planner Feedback")
-            if overall_readiness >= 80:
-                feedback_text = "You're in a strong position. Stay consistent and keep revising smartly."
-            elif overall_readiness >= 50:
-                feedback_text = "You're doing okay, but some topics still need more focus."
-            else:
-                feedback_text = "Your exam is getting close, so focus on the weakest and most urgent topics first."
-
-            st.markdown(
-                f"<div class='feedback-box'><b>Personalized Feedback:</b><br>{feedback_text}</div>",
-                unsafe_allow_html=True
-            )
-
-            # Downloads
-            download_text = create_download_text(all_subject_results, summary_values, timetable_df)
-            pdf_bytes = build_revision_pdf(all_subject_results, summary_values, timetable_df)
-
-            dl1, dl2 = st.columns(2)
-            with dl1:
-                st.download_button(
-                    label="📥 Download Revision Plan (.txt)",
-                    data=download_text,
-                    file_name="smart_revision_plan.txt",
-                    mime="text/plain"
-                )
-
-            with dl2:
-                st.download_button(
-                    label="📄 Download Styled Revision Plan (.pdf)",
-                    data=pdf_bytes,
-                    file_name="smart_revision_plan.pdf",
-                    mime="application/pdf"
-                )
+                st.markdown("<div class='cute-note'>🎀 PDF is best for presentation or saving a pretty final revision report.</div>", unsafe_allow_html=True)
