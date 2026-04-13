@@ -6,8 +6,7 @@ from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    PageBreak
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
@@ -23,25 +22,41 @@ st.set_page_config(
 )
 
 # ---------------------------------
-# Demo users
+# Demo database in session state
 # ---------------------------------
-DEMO_USERS = {
-    "wawa": "1234",
-    "student": "revision123",
-    "admin": "smartplanner"
-}
+if "users" not in st.session_state:
+    st.session_state.users = {
+        "student": {
+            "password": "revision123",
+            "full_name": "Demo Student"
+        },
+        "wawa": {
+            "password": "1234",
+            "full_name": "Wawa"
+        },
+        "admin": {
+            "password": "smartplanner",
+            "full_name": "Admin User"
+        }
+    }
 
-# ---------------------------------
-# Session state defaults
-# ---------------------------------
+if "planner_history" not in st.session_state:
+    st.session_state.planner_history = {}
+
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if "username" not in st.session_state:
     st.session_state.username = ""
 
+if "full_name" not in st.session_state:
+    st.session_state.full_name = ""
+
+if "auth_mode" not in st.session_state:
+    st.session_state.auth_mode = "login"
+
 # ---------------------------------
-# Custom styling
+# Styling
 # ---------------------------------
 st.markdown("""
 <style>
@@ -156,8 +171,8 @@ st.markdown("""
     margin-bottom: 0.8rem;
 }
 .login-wrap {
-    max-width: 460px;
-    margin: 3rem auto;
+    max-width: 520px;
+    margin: 2.5rem auto;
     padding: 2rem;
     border-radius: 24px;
     background:
@@ -177,6 +192,13 @@ st.markdown("""
     color: #d4cbe8;
     margin-bottom: 1.4rem;
 }
+.profile-box {
+    padding: 1rem;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    margin-bottom: 1rem;
+}
 hr {
     border: none;
     border-top: 1px solid rgba(255,255,255,0.08);
@@ -191,9 +213,9 @@ hr {
 def convert_to_days(value, unit):
     if unit == "Day(s)":
         return int(value)
-    elif unit == "Week(s)":
+    if unit == "Week(s)":
         return int(value * 7)
-    elif unit == "Month(s)":
+    if unit == "Month(s)":
         return int(value * 30)
     return int(value)
 
@@ -202,10 +224,9 @@ def format_minutes(minutes):
     remaining_minutes = minutes % 60
     if hours > 0 and remaining_minutes > 0:
         return f"{int(hours)} hour(s) {int(remaining_minutes)} minute(s)"
-    elif hours > 0:
+    if hours > 0:
         return f"{int(hours)} hour(s)"
-    else:
-        return f"{int(remaining_minutes)} minute(s)"
+    return f"{int(remaining_minutes)} minute(s)"
 
 def shorten_text(text, max_len=14):
     return text if len(text) <= max_len else text[:max_len] + "..."
@@ -435,6 +456,19 @@ def get_today_focus(topic_df):
         "reason": "High weakness and closer exam date."
     }
 
+def save_history_entry(username, summary_values):
+    if username not in st.session_state.planner_history:
+        st.session_state.planner_history[username] = []
+
+    st.session_state.planner_history[username].append({
+        "date": datetime.now().strftime("%d %b %Y, %I:%M %p"),
+        "top_subject": summary_values["most_prioritized_subject"],
+        "weakest_topic": summary_values["weakest_topic"],
+        "total_topics": summary_values["total_topics"],
+        "study_time": summary_values["total_study_time"],
+        "readiness": f"{summary_values['overall_readiness']}%"
+    })
+
 def create_download_text(all_subject_results, summary_values, timetable_df):
     output = StringIO()
     output.write("SMART REVISION PLAN\n")
@@ -455,7 +489,6 @@ def create_download_text(all_subject_results, summary_values, timetable_df):
         output.write(f"Most Prioritized Topic: {subject['most_prioritized_topic']}\n")
         output.write(f"Average Weakness: {subject['average_weakness']}\n")
         output.write(f"Readiness Score: {subject['readiness_score']}%\n")
-
         for topic in subject["topic_suggestions"]:
             output.write(
                 f" - {topic['topic']} | Weakness: {topic['weakness_level']} | "
@@ -465,7 +498,6 @@ def create_download_text(all_subject_results, summary_values, timetable_df):
 
     output.write("\n\nSTUDY TIMETABLE\n")
     output.write("=" * 50 + "\n")
-
     if not timetable_df.empty:
         for _, row in timetable_df.iterrows():
             output.write(
@@ -476,21 +508,9 @@ def create_download_text(all_subject_results, summary_values, timetable_df):
 
 def load_sample_data():
     return [
-        {
-            "subject_name": "Data Science",
-            "days_left": 7,
-            "topics": [("Data Mining", 5), ("Data Visualization", 2)]
-        },
-        {
-            "subject_name": "Database",
-            "days_left": 14,
-            "topics": [("SQL", 4), ("ERD", 3)]
-        },
-        {
-            "subject_name": "Artificial Intelligence",
-            "days_left": 3,
-            "topics": [("Neural Networks", 5), ("Search Algorithm", 4)]
-        }
+        {"subject_name": "Data Science", "days_left": 7, "topics": [("Data Mining", 5), ("Data Visualization", 2)]},
+        {"subject_name": "Database", "days_left": 14, "topics": [("SQL", 4), ("ERD", 3)]},
+        {"subject_name": "Artificial Intelligence", "days_left": 3, "topics": [("Neural Networks", 5), ("Search Algorithm", 4)]}
     ]
 
 # ---------------------------------
@@ -522,37 +542,16 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
     )
 
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "TitleStyle", parent=styles["Title"], fontName="Helvetica-Bold",
-        fontSize=24, leading=30, alignment=TA_CENTER,
-        textColor=colors.whitesmoke, spaceAfter=10
-    )
-    subtitle_style = ParagraphStyle(
-        "SubtitleStyle", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=10.5, leading=15, alignment=TA_CENTER,
-        textColor=colors.HexColor("#E3D9F7"), spaceAfter=18
-    )
-    heading_style = ParagraphStyle(
-        "HeadingStyle", parent=styles["Heading2"], fontName="Helvetica-Bold",
-        fontSize=14, leading=18, textColor=colors.HexColor("#F0E4FF"),
-        spaceBefore=10, spaceAfter=8
-    )
-    body_style = ParagraphStyle(
-        "BodyStyle", parent=styles["BodyText"], fontName="Helvetica",
-        fontSize=10, leading=14, textColor=colors.whitesmoke, alignment=TA_LEFT
-    )
-    small_style = ParagraphStyle(
-        "SmallStyle", parent=styles["BodyText"], fontName="Helvetica",
-        fontSize=9, leading=12, textColor=colors.HexColor("#EAEAF2"), alignment=TA_LEFT
-    )
+    title_style = ParagraphStyle("TitleStyle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=24, leading=30, alignment=TA_CENTER, textColor=colors.whitesmoke, spaceAfter=10)
+    subtitle_style = ParagraphStyle("SubtitleStyle", parent=styles["Normal"], fontName="Helvetica", fontSize=10.5, leading=15, alignment=TA_CENTER, textColor=colors.HexColor("#E3D9F7"), spaceAfter=18)
+    heading_style = ParagraphStyle("HeadingStyle", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=14, leading=18, textColor=colors.HexColor("#F0E4FF"), spaceBefore=10, spaceAfter=8)
+    body_style = ParagraphStyle("BodyStyle", parent=styles["BodyText"], fontName="Helvetica", fontSize=10, leading=14, textColor=colors.whitesmoke, alignment=TA_LEFT)
+    small_style = ParagraphStyle("SmallStyle", parent=styles["BodyText"], fontName="Helvetica", fontSize=9, leading=12, textColor=colors.HexColor("#EAEAF2"), alignment=TA_LEFT)
 
     story = []
     story.append(Spacer(1, 28))
     story.append(Paragraph("Smart Revision Planner", title_style))
-    story.append(Paragraph(
-        "A personalized revision report with ranked subjects, study priorities, and a day-by-day timetable.",
-        subtitle_style
-    ))
+    story.append(Paragraph("A personalized revision report with ranked subjects, study priorities, and a day-by-day timetable.", subtitle_style))
     story.append(Spacer(1, 18))
 
     cover_table = Table([
@@ -624,16 +623,9 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
     else:
         timetable_rows = [["Day", "Subject", "Topic", "Duration", "Method"]]
         for _, row in timetable_df.iterrows():
-            timetable_rows.append([
-                row["Day"], row["Subject"], row["Topic"],
-                row["Study Duration"], row["Study Method"]
-            ])
+            timetable_rows.append([row["Day"], row["Subject"], row["Topic"], row["Study Duration"], row["Study Method"]])
 
-        timetable_table = Table(
-            timetable_rows,
-            colWidths=[20 * mm, 35 * mm, 40 * mm, 30 * mm, 55 * mm],
-            repeatRows=1
-        )
+        timetable_table = Table(timetable_rows, colWidths=[20 * mm, 35 * mm, 40 * mm, 30 * mm, 55 * mm], repeatRows=1)
         timetable_table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#6C3BB8")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
@@ -656,47 +648,84 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
     return pdf
 
 # ---------------------------------
-# Login screen
+# Authentication UI
 # ---------------------------------
-def show_login():
+def login_view():
     st.markdown("""
     <div class="login-wrap">
-        <div class="login-title">🔐 Smart Planner Login</div>
+        <div class="login-title">🔐 Smart Planner Access</div>
         <div class="login-subtitle">
-            Sign in to access your cute revision dashboard.
+            Login or create an account to access your revision dashboard.
         </div>
     </div>
     """, unsafe_allow_html=True)
 
+    mode_col1, mode_col2, mode_col3 = st.columns([1, 1, 1])
+    with mode_col2:
+        st.radio(
+            "Choose access mode",
+            ["login", "signup"],
+            key="auth_mode",
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+        if st.session_state.auth_mode == "login":
+            username = st.text_input("Username", key="login_user")
+            password = st.text_input("Password", type="password", key="login_pass")
 
-        if st.button("Login", type="primary", use_container_width=True):
-            if username in DEMO_USERS and DEMO_USERS[username] == password:
-                st.session_state.logged_in = True
-                st.session_state.username = username
-                st.rerun()
-            else:
-                st.error("Invalid username or password.")
+            if st.button("Login", type="primary", use_container_width=True):
+                if username in st.session_state.users and st.session_state.users[username]["password"] == password:
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+                    st.session_state.full_name = st.session_state.users[username]["full_name"]
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
 
-        with st.expander("Demo account"):
-            st.write("Username: `student`")
-            st.write("Password: `revision123`")
+            with st.expander("Demo account"):
+                st.write("Username: `student`")
+                st.write("Password: `revision123`")
+
+        else:
+            full_name = st.text_input("Full Name", key="signup_name")
+            username = st.text_input("Choose Username", key="signup_user")
+            password = st.text_input("Choose Password", type="password", key="signup_pass")
+            confirm_password = st.text_input("Confirm Password", type="password", key="signup_confirm")
+
+            if st.button("Create Account", type="primary", use_container_width=True):
+                if not full_name or not username or not password or not confirm_password:
+                    st.error("Please fill in all fields.")
+                elif username in st.session_state.users:
+                    st.error("Username already exists.")
+                elif password != confirm_password:
+                    st.error("Passwords do not match.")
+                else:
+                    st.session_state.users[username] = {
+                        "password": password,
+                        "full_name": full_name
+                    }
+                    st.session_state.planner_history[username] = []
+                    st.success("Account created successfully. Please switch to login and sign in.")
 
 # ---------------------------------
-# Main app
+# Sidebar and profile
 # ---------------------------------
-def show_app():
+def sidebar_panel():
     with st.sidebar:
         st.markdown("## 🌙 Planner Panel")
         st.write(f"Logged in as **{st.session_state.username}**")
+        st.caption(f"Name: {st.session_state.full_name}")
+
         if st.button("Logout"):
             st.session_state.logged_in = False
             st.session_state.username = ""
+            st.session_state.full_name = ""
             st.rerun()
 
+        st.markdown("---")
         st.markdown("""
 **What this app does**
 - ranks your subjects
@@ -715,15 +744,48 @@ def show_app():
         st.caption("Use 2–5 subjects for the cleanest output.")
         st.caption("Keep topic names short and clear.")
 
+def profile_and_history():
+    st.subheader("👤 Profile & Planner History")
+
+    p1, p2 = st.columns([1, 2])
+
+    with p1:
+        st.markdown(f"""
+        <div class="profile-box">
+            <h4>Profile</h4>
+            <p><b>Full Name:</b> {st.session_state.full_name}</p>
+            <p><b>Username:</b> {st.session_state.username}</p>
+            <p><b>Account Type:</b> Demo User</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with p2:
+        history = st.session_state.planner_history.get(st.session_state.username, [])
+        if history:
+            st.markdown("<div class='profile-box'><h4>Saved Planner History</h4></div>", unsafe_allow_html=True)
+            history_df = pd.DataFrame(history)
+            st.dataframe(history_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No planner history saved yet. Generate a plan first.")
+
+# ---------------------------------
+# Main app
+# ---------------------------------
+def app_view():
+    sidebar_panel()
+
     st.markdown(f"""
     <div class="hero-box">
         <div class="main-title">📚 Smart Revision Planner</div>
         <div class="subtitle">
-            Welcome back, <b>{st.session_state.username}</b>. Plan your study smarter based on exam time,
+            Welcome back, <b>{st.session_state.full_name}</b>. Plan your study smarter based on exam time,
             topic weakness, and subject priority.
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+    profile_and_history()
+    st.markdown("<hr>", unsafe_allow_html=True)
 
     top_col1, top_col2, top_col3 = st.columns([1, 1, 1])
 
@@ -741,52 +803,23 @@ def show_app():
         subjects_data = load_sample_data()
         st.info("Sample data loaded. Click the button below to generate the planner.")
     else:
-        num_subjects = st.number_input(
-            "How many subjects do you want to enter?",
-            min_value=1,
-            max_value=10,
-            value=2,
-            step=1
-        )
-
+        num_subjects = st.number_input("How many subjects do you want to enter?", min_value=1, max_value=10, value=2, step=1)
         subjects_data = []
 
         for s in range(num_subjects):
             st.markdown(f"<div class='section-card'><h3>Subject {s+1}</h3></div>", unsafe_allow_html=True)
 
-            subject_name = st.text_input(
-                f"Enter subject name for Subject {s+1}",
-                key=f"subject_name_{s}"
-            ).strip()
+            subject_name = st.text_input(f"Enter subject name for Subject {s+1}", key=f"subject_name_{s}").strip()
 
             col1, col2 = st.columns(2)
-
             with col1:
-                time_value = st.number_input(
-                    f"Enter time left before exam for Subject {s+1}",
-                    min_value=1,
-                    value=7,
-                    step=1,
-                    key=f"time_value_{s}"
-                )
-
+                time_value = st.number_input(f"Enter time left before exam for Subject {s+1}", min_value=1, value=7, step=1, key=f"time_value_{s}")
             with col2:
-                time_unit = st.selectbox(
-                    f"Select time unit for Subject {s+1}",
-                    ["Day(s)", "Week(s)", "Month(s)"],
-                    key=f"time_unit_{s}"
-                )
+                time_unit = st.selectbox(f"Select time unit for Subject {s+1}", ["Day(s)", "Week(s)", "Month(s)"], key=f"time_unit_{s}")
 
             days_left = convert_to_days(time_value, time_unit)
 
-            num_topics = st.number_input(
-                f"How many topics for Subject {s+1}?",
-                min_value=1,
-                max_value=10,
-                value=2,
-                step=1,
-                key=f"num_topics_{s}"
-            )
+            num_topics = st.number_input(f"How many topics for Subject {s+1}?", min_value=1, max_value=10, value=2, step=1, key=f"num_topics_{s}")
 
             topics = []
             seen_topics = set()
@@ -796,19 +829,10 @@ def show_app():
                 topic_col1, topic_col2 = st.columns(2)
 
                 with topic_col1:
-                    topic_name = st.text_input(
-                        f"Enter topic {t+1} name",
-                        key=f"topic_name_{s}_{t}"
-                    ).strip()
+                    topic_name = st.text_input(f"Enter topic {t+1} name", key=f"topic_name_{s}_{t}").strip()
 
                 with topic_col2:
-                    weakness_level = st.slider(
-                        f"Weakness level for Topic {t+1}",
-                        min_value=1,
-                        max_value=5,
-                        value=3,
-                        key=f"weakness_{s}_{t}"
-                    )
+                    weakness_level = st.slider(f"Weakness level for Topic {t+1}", min_value=1, max_value=5, value=3, key=f"weakness_{s}_{t}")
 
                 if topic_name:
                     topic_key = topic_name.lower()
@@ -842,10 +866,7 @@ def show_app():
                 total_topics = len(topic_df)
                 total_minutes = int(topic_df["Recommended Minutes"].sum()) if not topic_df.empty else 0
                 most_prioritized_subject = all_subject_results[0]["subject_name"]
-                weakest_topic_row = topic_df.sort_values(
-                    by=["Weakness Level", "Recommended Minutes"],
-                    ascending=[False, False]
-                ).iloc[0]
+                weakest_topic_row = topic_df.sort_values(by=["Weakness Level", "Recommended Minutes"], ascending=[False, False]).iloc[0]
                 weakest_topic = f"{weakest_topic_row['Topic']} ({weakest_topic_row['Subject']})"
                 overall_readiness = int(sum(s["readiness_score"] for s in all_subject_results) / len(all_subject_results))
 
@@ -857,10 +878,12 @@ def show_app():
                     "overall_readiness": overall_readiness
                 }
 
+                save_history_entry(st.session_state.username, summary_values)
+
                 if overall_readiness >= 80 and show_fun_mode:
                     st.balloons()
 
-                st.success("Your smart revision plan has been generated.")
+                st.success("Your smart revision plan has been generated and saved to your history.")
 
                 st.subheader("📊 Smart Summary Dashboard")
                 c1, c2, c3, c4, c5 = st.columns(5)
@@ -887,12 +910,7 @@ def show_app():
                             unsafe_allow_html=True
                         )
 
-                tab1, tab2, tab3, tab4 = st.tabs([
-                    "🌟 Dashboard",
-                    "📌 Subjects",
-                    "🗓 Timetable",
-                    "📥 Downloads"
-                ])
+                tab1, tab2, tab3, tab4 = st.tabs(["🌟 Dashboard", "📌 Subjects", "🗓 Timetable", "📥 Downloads"])
 
                 with tab1:
                     st.markdown("<div class='soft-box'><b>Overview</b></div>", unsafe_allow_html=True)
@@ -912,7 +930,6 @@ def show_app():
                         st.bar_chart(weakness_chart_df.set_index("Topic"))
 
                     st.markdown("<hr>", unsafe_allow_html=True)
-
                     low1, low2 = st.columns(2)
 
                     with low1:
@@ -929,12 +946,10 @@ def show_app():
 
                 with tab2:
                     st.subheader("📌 Ranked Revision Suggestions")
-
                     for i, subject in enumerate(all_subject_results, start=1):
                         st.markdown("<div class='subject-card'>", unsafe_allow_html=True)
                         st.markdown(
-                            f"## {subject['subject_icon']} Subject Rank {i}: {subject['subject_name']} "
-                            + get_priority_badge(subject["exam_priority"]),
+                            f"## {subject['subject_icon']} Subject Rank {i}: {subject['subject_name']} " + get_priority_badge(subject["exam_priority"]),
                             unsafe_allow_html=True
                         )
 
@@ -977,12 +992,7 @@ def show_app():
                         st.caption("Each long topic is split into smaller sessions so the plan feels more realistic and less overwhelming.")
 
                         csv_data = timetable_df.to_csv(index=False).encode("utf-8")
-                        st.download_button(
-                            label="📥 Download Timetable (.csv)",
-                            data=csv_data,
-                            file_name="study_timetable.csv",
-                            mime="text/csv"
-                        )
+                        st.download_button("📥 Download Timetable (.csv)", data=csv_data, file_name="study_timetable.csv", mime="text/csv")
 
                 with tab4:
                     st.subheader("📥 Export Your Plan")
@@ -994,35 +1004,22 @@ def show_app():
                     else:
                         feedback_text = "Your exam is getting close, so focus on the weakest and most urgent topics first."
 
-                    st.markdown(
-                        f"<div class='feedback-box'><b>Personalized Feedback:</b><br>{feedback_text}</div>",
-                        unsafe_allow_html=True
-                    )
+                    st.markdown(f"<div class='feedback-box'><b>Personalized Feedback:</b><br>{feedback_text}</div>", unsafe_allow_html=True)
 
                     st.markdown("<div class='download-card'><b>📄 PDF Version</b><br>Best for presentation, submission, or saving a polished final report.</div>", unsafe_allow_html=True)
                     pdf_bytes = build_revision_pdf(all_subject_results, summary_values, timetable_df)
-                    st.download_button(
-                        label="📄 Download Styled Revision Plan (.pdf)",
-                        data=pdf_bytes,
-                        file_name="smart_revision_plan.pdf",
-                        mime="application/pdf"
-                    )
+                    st.download_button("📄 Download Styled Revision Plan (.pdf)", data=pdf_bytes, file_name="smart_revision_plan.pdf", mime="application/pdf")
 
                     st.markdown("<div class='download-card'><b>📝 TXT Version</b><br>Best for simple quick notes or lightweight text reference.</div>", unsafe_allow_html=True)
                     download_text = create_download_text(all_subject_results, summary_values, timetable_df)
-                    st.download_button(
-                        label="📝 Download Revision Plan (.txt)",
-                        data=download_text,
-                        file_name="smart_revision_plan.txt",
-                        mime="text/plain"
-                    )
+                    st.download_button("📝 Download Revision Plan (.txt)", data=download_text, file_name="smart_revision_plan.txt", mime="text/plain")
 
                     st.markdown("<div class='cute-note'>🎀 PDF is best for presentation or saving a pretty final revision report.</div>", unsafe_allow_html=True)
 
 # ---------------------------------
-# Run
+# Run app
 # ---------------------------------
 if not st.session_state.logged_in:
-    show_login()
+    login_view()
 else:
-    show_app()
+    app_view()
