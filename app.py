@@ -280,6 +280,101 @@ def ensure_user_data(username):
         }
 
 # ---------------------------------
+# Tone helpers
+# ---------------------------------
+def get_mode_tone_text(mode, weakness_level, topic_name):
+    mode = (mode or "Cute").strip()
+
+    if mode == "Cute":
+        if weakness_level >= 4:
+            reminder = f"You should study {topic_name} first, love. This topic needs extra care because your weakness level is high and the exam is getting close."
+            suggestion = "Revise deeply in a calm way, then test yourself with practice questions."
+            best_tip = "Use flashcards, active recall, and repeat the hardest parts gently until they feel familiar."
+        elif weakness_level == 3:
+            reminder = f"{topic_name} still needs proper attention. You’re not lost, but this topic needs more polishing."
+            suggestion = "Review the concept clearly, then do a short quiz to check your understanding."
+            best_tip = "Use summary notes and mini self-tests to build confidence step by step."
+        else:
+            reminder = f"You already have some foundation in {topic_name}, so this can be a lighter review."
+            suggestion = "Do a quick recap and keep the important points fresh."
+            best_tip = "A short quiz, mind map, or note review is enough here."
+
+    elif mode == "Strict":
+        if weakness_level >= 4:
+            reminder = f"Prioritize {topic_name} immediately. This is a weak area and you cannot afford to delay it."
+            suggestion = "Study the full concept properly and complete practice questions after revision."
+            best_tip = "Use active recall and repeat difficult questions until you can answer without hesitation."
+        elif weakness_level == 3:
+            reminder = f"{topic_name} requires proper effort. Your understanding is moderate, not secure."
+            suggestion = "Review the concept and test yourself with a short evaluation."
+            best_tip = "Do not rely on passive reading. Use short quizzes and self-checks."
+        else:
+            reminder = f"{topic_name} is relatively stable, but it still needs maintenance."
+            suggestion = "Do a focused recap and confirm the core points."
+            best_tip = "Keep it concise, but do not ignore it."
+
+    elif mode == "Brutal":
+        if weakness_level >= 4:
+            reminder = f"{topic_name} is basically waving a red flag at you. Study it first before it embarrasses you in the exam."
+            suggestion = "Sit down, suffer productively, and drill this topic with serious practice questions."
+            best_tip = "Stop romanticizing being confused. Use active recall until your brain finally gets the memo."
+        elif weakness_level == 3:
+            reminder = f"{topic_name} is not terrible, but it’s also not giving future genius energy yet."
+            suggestion = "Review it properly before it turns into a last-minute regret."
+            best_tip = "Quiz yourself now, so you don’t cry over it later."
+        else:
+            reminder = f"{topic_name} is one of the few things not actively trying to ruin your exam."
+            suggestion = "Do a quick recap and move on before you waste too much time here."
+            best_tip = "Keep it short. This topic does not need a full emotional documentary."
+
+    else:  # Balanced
+        if weakness_level >= 4:
+            reminder = f"{topic_name} should be your first priority because your weakness level is high and the exam is approaching."
+            suggestion = "Revise the full concept carefully and reinforce it with practice questions."
+            best_tip = "Use active recall and focused exercises to improve faster."
+        elif weakness_level == 3:
+            reminder = f"{topic_name} still needs attention because your understanding is moderate."
+            suggestion = "Review the main concepts and check your progress with a short quiz."
+            best_tip = "Use summary notes and mini self-tests."
+        else:
+            reminder = f"{topic_name} is more manageable, so you can treat it as a lighter review."
+            suggestion = "Do a quick recap to keep the important points fresh."
+            best_tip = "Use a brief quiz, mind map, or short note review."
+
+    return reminder, suggestion, best_tip
+
+
+def get_mode_feedback_text(mode, overall_readiness):
+    mode = (mode or "Cute").strip()
+
+    if mode == "Cute":
+        if overall_readiness >= 80:
+            return "You’re in a really lovely position right now. Stay consistent and keep revising smartly."
+        elif overall_readiness >= 50:
+            return "You’re doing okay, but a few topics still need a little more love and attention."
+        return "The exam is getting close, so focus gently but seriously on your weakest and most urgent topics first."
+
+    if mode == "Strict":
+        if overall_readiness >= 80:
+            return "You are in a strong position. Maintain discipline and finish properly."
+        elif overall_readiness >= 50:
+            return "Your preparation is acceptable, but several weak areas still need direct attention."
+        return "Your exam is approaching. Focus immediately on your weakest and most urgent topics."
+
+    if mode == "Brutal":
+        if overall_readiness >= 80:
+            return "Shockingly impressive. Try not to ruin it now — just stay consistent and finish strong."
+        elif overall_readiness >= 50:
+            return "You’re surviving, not thriving. Tighten up those weak topics before they humble you."
+        return "This is not the time to stare at the ceiling dramatically. Attack the weakest topics first and save yourself."
+
+    if overall_readiness >= 80:
+        return "You’re in a strong position. Keep the momentum and revise consistently."
+    elif overall_readiness >= 50:
+        return "You’re doing fairly well, but some topics still need more focus."
+    return "Your exam is getting close, so prioritize the weakest and most urgent topics first."
+
+# ---------------------------------
 # Helper functions
 # ---------------------------------
 def convert_to_days(value, unit):
@@ -316,22 +411,10 @@ def get_priority_details(days_left):
 
 def get_study_method(weakness_level):
     if weakness_level >= 4:
-        return (
-            "Active Recall + Practice Questions",
-            "Revise deeply by chapter and do practice questions.",
-            "Use flashcards, active recall, and topic-based exercises."
-        )
+        return "Active Recall + Practice Questions"
     elif weakness_level == 3:
-        return (
-            "Concept Review + Short Quiz",
-            "Review notes, understand key concepts, and do a short quiz.",
-            "Use summary notes, short quizzes, and mini self-tests."
-        )
-    return (
-        "Quick Recap",
-        "Do a recap and review the important points only.",
-        "Try a quick quiz, skim notes, or make a simple mind map."
-    )
+        return "Concept Review + Short Quiz"
+    return "Quick Recap"
 
 def calculate_readiness_score(days_left, avg_weakness):
     time_factor = min(days_left / 30, 1.0) * 50
@@ -408,7 +491,7 @@ def get_subject_icon(subject_name):
         return "🌐"
     return "📘"
 
-def process_subject(subject_name, days_left, topics):
+def process_subject(subject_name, days_left, topics, mode="Cute"):
     if days_left <= 0:
         return {"error": f"Time left for subject '{subject_name}' must be greater than 0."}
     if len(topics) == 0:
@@ -422,14 +505,8 @@ def process_subject(subject_name, days_left, topics):
             return {"error": f"Weakness level for '{topic_name}' in subject '{subject_name}' must be between 1 and 5."}
 
         recommended_minutes = base_minutes + (weakness_level * 15)
-        study_method, suggestion, best_tip = get_study_method(weakness_level)
-
-        if weakness_level >= 4:
-            reminder = f"You should study {topic_name} first since your weakness level is high and the exam is getting closer."
-        elif weakness_level == 3:
-            reminder = f"You should give proper attention to {topic_name} because your understanding is moderate and still needs improvement."
-        else:
-            reminder = f"Since your weakness level is lower, you can study {topic_name} more lightly because you already have some core understanding."
+        study_method = get_study_method(weakness_level)
+        reminder, suggestion, best_tip = get_mode_tone_text(mode, weakness_level, topic_name)
 
         topic_suggestions.append({
             "subject": subject_name,
@@ -463,10 +540,15 @@ def process_subject(subject_name, days_left, topics):
         "readiness_status": get_readiness_status(readiness_score)
     }
 
-def process_all_subjects(subjects_data):
+def process_all_subjects(subjects_data, mode="Cute"):
     all_subject_results = []
     for subject in subjects_data:
-        result = process_subject(subject["subject_name"], subject["days_left"], subject["topics"])
+        result = process_subject(
+            subject["subject_name"],
+            subject["days_left"],
+            subject["topics"],
+            mode=mode
+        )
         if "error" in result:
             return {"error": result["error"]}
         all_subject_results.append(result)
@@ -1240,8 +1322,19 @@ def home_page():
         m3.metric("Level", progress_summary["level"])
         m4.metric("XP", progress_summary["xp"])
 
+        combined_message = get_motivation_message(
+            settings["motivational_mode"],
+            progress_summary["completion_percent"],
+            progress_summary["current_streak"]
+        )
+
+        combined_feedback = get_mode_feedback_text(
+            settings["motivational_mode"],
+            progress_summary["completion_percent"]
+        )
+
         st.markdown(
-            f"<div class='feedback-box'><b>Motivation:</b><br>{get_motivation_message(settings['motivational_mode'], progress_summary['completion_percent'], progress_summary['current_streak'])}</div>",
+            f"<div class='feedback-box'><b>Motivation:</b><br>{combined_message}<br><br><b>Planner Tone:</b><br>{combined_feedback}</div>",
             unsafe_allow_html=True
         )
 
@@ -1489,7 +1582,8 @@ def planner_page():
             st.error("Please enter at least one subject.")
             return
 
-        result = process_all_subjects(subjects_data)
+        current_mode = settings["motivational_mode"]
+        result = process_all_subjects(subjects_data, mode=current_mode)
         if "error" in result:
             st.error(result["error"])
             return
@@ -1582,8 +1676,15 @@ def planner_page():
 
     st.progress(progress_summary["completion_percent"] / 100)
 
+    planner_feedback = get_mode_feedback_text(settings["motivational_mode"], overall_readiness)
+    motivation_line = get_motivation_message(
+        settings["motivational_mode"],
+        progress_summary["completion_percent"],
+        progress_summary["current_streak"]
+    )
+
     st.markdown(
-        f"<div class='feedback-box'><b>Motivation:</b><br>{get_motivation_message(settings['motivational_mode'], progress_summary['completion_percent'], progress_summary['current_streak'])}</div>",
+        f"<div class='feedback-box'><b>Motivation:</b><br>{motivation_line}<br><br><b>Planner Feedback:</b><br>{planner_feedback}</div>",
         unsafe_allow_html=True
     )
 
@@ -1801,13 +1902,19 @@ def planner_page():
             st.markdown("### Topic Suggestions")
             for j, topic in enumerate(subject["topic_suggestions"], start=1):
                 with st.expander(f"Topic {j}: {topic['topic']}"):
+                    live_reminder, live_suggestion, live_best_tip = get_mode_tone_text(
+                        settings["motivational_mode"],
+                        topic["weakness_level"],
+                        topic["topic"]
+                    )
+
                     st.write(f"**Weakness Level:** {topic['weakness_level']}")
                     st.progress(topic["weakness_level"] / 5)
                     st.write(f"**Recommended Study Duration:** {format_minutes(topic['recommended_minutes'])}")
                     st.write(f"**Study Method:** {topic['study_method']}")
-                    st.write(f"**Reminder:** {topic['reminder']}")
-                    st.write(f"**Suggestion:** {topic['suggestion']}")
-                    st.write(f"**Best Tip:** {topic['best_tip']}")
+                    st.write(f"**Reminder:** {live_reminder}")
+                    st.write(f"**Suggestion:** {live_suggestion}")
+                    st.write(f"**Best Tip:** {live_best_tip}")
             st.markdown("</div>", unsafe_allow_html=True)
 
     with tab4:
@@ -1891,12 +1998,8 @@ def downloads_page():
     progress_summary = get_progress_summary(st.session_state.username, timetable_df)
 
     overall_readiness = summary_values["overall_readiness"]
-    if overall_readiness >= 80:
-        feedback_text = "You're in a strong position. Stay consistent and keep revising smartly."
-    elif overall_readiness >= 50:
-        feedback_text = "You're doing okay, but some topics still need more focus."
-    else:
-        feedback_text = "Your exam is getting close, so focus on the weakest and most urgent topics first."
+    mode = st.session_state.user_settings[st.session_state.username]["motivational_mode"]
+    feedback_text = get_mode_feedback_text(mode, overall_readiness)
 
     st.markdown(
         f"<div class='feedback-box'><b>Personalized Feedback:</b><br>{feedback_text}</div>",
