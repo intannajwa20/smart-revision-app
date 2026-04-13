@@ -52,11 +52,11 @@ if "current_page" not in st.session_state:
 if "last_plan_data" not in st.session_state:
     st.session_state.last_plan_data = None
 
-if "session_completion" not in st.session_state:
-    st.session_state.session_completion = {}
-
 if "user_progress" not in st.session_state:
     st.session_state.user_progress = {}
+
+if "user_settings" not in st.session_state:
+    st.session_state.user_settings = {}
 
 # ---------------------------------
 # Styling
@@ -112,12 +112,6 @@ st.markdown("""
     margin-bottom: 1rem;
     box-shadow: 0 6px 16px rgba(0,0,0,0.10);
 }
-.soft-box {
-    padding: 0.95rem 1rem;
-    border-radius: 16px;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.06);
-}
 .feedback-box {
     padding: 1rem 1.2rem;
     border-radius: 16px;
@@ -151,13 +145,6 @@ st.markdown("""
     font-weight: 700;
     background: rgba(75, 192, 192, 0.12);
     border: 1px solid rgba(75, 192, 192, 0.28);
-}
-.cute-note {
-    padding: 0.75rem 0.95rem;
-    border-radius: 14px;
-    background: rgba(255,255,255,0.03);
-    border-left: 4px solid rgba(142,68,173,0.8);
-    margin-top: 0.5rem;
 }
 .mini-card {
     padding: 1rem;
@@ -234,6 +221,27 @@ st.markdown("""
     background: rgba(255, 206, 86, 0.12);
     border: 1px solid rgba(255, 206, 86, 0.26);
 }
+.badge-box {
+    padding: 0.85rem 1rem;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    margin-bottom: 0.6rem;
+}
+.level-box {
+    padding: 1rem 1.2rem;
+    border-radius: 18px;
+    background: rgba(142,68,173,0.12);
+    border: 1px solid rgba(142,68,173,0.28);
+    margin-bottom: 1rem;
+}
+.settings-box {
+    padding: 1rem 1.2rem;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    margin-bottom: 1rem;
+}
 hr {
     border: none;
     border-top: 1px solid rgba(255,255,255,0.08);
@@ -243,7 +251,7 @@ hr {
 """, unsafe_allow_html=True)
 
 # ---------------------------------
-# Helper functions
+# User data defaults
 # ---------------------------------
 def ensure_user_data(username):
     if username not in st.session_state.planner_history:
@@ -255,7 +263,17 @@ def ensure_user_data(username):
             "plans_generated": 0
         }
 
+    if username not in st.session_state.user_settings:
+        st.session_state.user_settings[username] = {
+            "preferred_session_length": 60,
+            "daily_study_goal_minutes": 120,
+            "motivational_mode": "Cute",
+            "theme_name": "Midnight Violet"
+        }
 
+# ---------------------------------
+# Helper functions
+# ---------------------------------
 def convert_to_days(value, unit):
     if unit == "Day(s)":
         return int(value)
@@ -264,7 +282,6 @@ def convert_to_days(value, unit):
     if unit == "Month(s)":
         return int(value * 30)
     return int(value)
-
 
 def format_minutes(minutes):
     hours = minutes // 60
@@ -275,10 +292,8 @@ def format_minutes(minutes):
         return f"{int(hours)} hour(s)"
     return f"{int(remaining_minutes)} minute(s)"
 
-
 def shorten_text(text, max_len=14):
     return text if len(text) <= max_len else text[:max_len] + "..."
-
 
 def get_priority_details(days_left):
     if days_left <= 3:
@@ -290,7 +305,6 @@ def get_priority_details(days_left):
     elif days_left <= 30:
         return "Low", 2, 20
     return "Very Low", 1, 15
-
 
 def get_study_method(weakness_level):
     if weakness_level >= 4:
@@ -311,13 +325,11 @@ def get_study_method(weakness_level):
         "Try a quick quiz, skim notes, or make a simple mind map."
     )
 
-
 def calculate_readiness_score(days_left, avg_weakness):
     time_factor = min(days_left / 30, 1.0) * 50
     weakness_factor = ((6 - avg_weakness) / 5) * 50
     score = int(time_factor + weakness_factor)
     return max(0, min(score, 100))
-
 
 def get_readiness_status(score):
     if score >= 80:
@@ -328,7 +340,6 @@ def get_readiness_status(score):
         return "Needs Work"
     return "Focus Now"
 
-
 def get_study_mood(score):
     if score >= 80:
         return "🌸 You’re in great shape"
@@ -338,6 +349,22 @@ def get_study_mood(score):
         return "🫧 You need a stronger push"
     return "⚡ Time to lock in"
 
+def get_motivation_message(mode, progress_percent, streak):
+    if mode == "Cute":
+        if progress_percent >= 80:
+            return "🌷 You’re doing amazing. Keep going, pretty genius."
+        if progress_percent >= 50:
+            return "✨ You’re making beautiful progress. Don’t stop now."
+        return "🫶 Small steps still count. Just begin."
+    if mode == "Strict":
+        if progress_percent >= 80:
+            return "Good. Stay disciplined and finish strong."
+        if progress_percent >= 50:
+            return "You’re halfway there. No slacking."
+        return "Focus. The work will not do itself."
+    if streak >= 3:
+        return "🔥 Consistency looks good on you."
+    return "📚 One focused session can change your whole day."
 
 def get_priority_badge(priority):
     if priority in ["Very High", "High"]:
@@ -345,7 +372,6 @@ def get_priority_badge(priority):
     elif priority == "Medium":
         return '<span class="tag-medium">Moderate</span>'
     return '<span class="tag-low">Manageable</span>'
-
 
 def get_subject_icon(subject_name):
     name = subject_name.lower()
@@ -362,7 +388,6 @@ def get_subject_icon(subject_name):
     if "network" in name or "security" in name:
         return "🌐"
     return "📘"
-
 
 def process_subject(subject_name, days_left, topics):
     if days_left <= 0:
@@ -419,7 +444,6 @@ def process_subject(subject_name, days_left, topics):
         "readiness_status": get_readiness_status(readiness_score)
     }
 
-
 def process_all_subjects(subjects_data):
     all_subject_results = []
     for subject in subjects_data:
@@ -430,7 +454,6 @@ def process_all_subjects(subjects_data):
 
     all_subject_results.sort(key=lambda x: x["subject_priority_score"], reverse=True)
     return {"all_subject_results": all_subject_results}
-
 
 def flatten_topics(all_subject_results):
     rows = []
@@ -448,13 +471,14 @@ def flatten_topics(all_subject_results):
             })
     return pd.DataFrame(rows)
 
-
-def generate_study_timetable(topic_df, start_date=None):
+def generate_study_timetable(topic_df, start_date=None, preferred_session_length=60):
     if topic_df.empty:
         return pd.DataFrame()
 
     if start_date is None:
         start_date = date.today()
+
+    preferred_session_length = max(20, min(int(preferred_session_length), 120))
 
     timetable_rows = []
     day_counter = 1
@@ -469,7 +493,7 @@ def generate_study_timetable(topic_df, start_date=None):
         minutes_left = int(row["Recommended Minutes"])
 
         while minutes_left > 0:
-            session_minutes = min(60, minutes_left)
+            session_minutes = min(preferred_session_length, minutes_left)
             session_date = start_date + timedelta(days=day_counter - 1)
 
             timetable_rows.append({
@@ -489,7 +513,6 @@ def generate_study_timetable(topic_df, start_date=None):
 
     return pd.DataFrame(timetable_rows)
 
-
 def get_focus_distribution(topic_df):
     if topic_df.empty:
         return pd.DataFrame(columns=["Category", "Count"])
@@ -505,13 +528,11 @@ def get_focus_distribution(topic_df):
     df["Category"] = df["Weakness Level"].apply(classify)
     return df["Category"].value_counts().rename_axis("Category").reset_index(name="Count")
 
-
 def get_workload_by_subject(topic_df):
     if topic_df.empty:
         return pd.DataFrame(columns=["Subject", "Recommended Minutes"])
     out = topic_df.groupby("Subject", as_index=False)["Recommended Minutes"].sum()
     return out.sort_values("Recommended Minutes", ascending=False)
-
 
 def get_today_focus(topic_df):
     if topic_df.empty:
@@ -526,7 +547,6 @@ def get_today_focus(topic_df):
         "reason": "High weakness and closer exam date."
     }
 
-
 def save_history_entry(username, summary_values):
     ensure_user_data(username)
 
@@ -539,7 +559,161 @@ def save_history_entry(username, summary_values):
         "readiness": f"{summary_values['overall_readiness']}%"
     })
 
+def load_sample_data():
+    return [
+        {"subject_name": "Data Science", "days_left": 7, "topics": [("Data Mining", 5), ("Data Visualization", 2)]},
+        {"subject_name": "Database", "days_left": 14, "topics": [("SQL", 4), ("ERD", 3)]},
+        {"subject_name": "Artificial Intelligence", "days_left": 3, "topics": [("Neural Networks", 5), ("Search Algorithm", 4)]}
+    ]
 
+# ---------------------------------
+# Progress / streak / XP / badges
+# ---------------------------------
+def get_completion_store(username):
+    ensure_user_data(username)
+    return st.session_state.user_progress[username]["completed_sessions"]
+
+def get_session_completed(username, session_id):
+    store = get_completion_store(username)
+    return session_id in store
+
+def set_session_completed(username, session_id, is_completed):
+    store = get_completion_store(username)
+    if is_completed:
+        store[session_id] = date.today().isoformat()
+    else:
+        if session_id in store:
+            del store[session_id]
+
+def calculate_streaks(date_strings):
+    if not date_strings:
+        return 0, 0
+
+    unique_dates = sorted(date.fromisoformat(d) for d in set(date_strings))
+
+    best_streak = 1
+    run = 1
+
+    for i in range(1, len(unique_dates)):
+        if unique_dates[i] == unique_dates[i - 1] + timedelta(days=1):
+            run += 1
+        else:
+            best_streak = max(best_streak, run)
+            run = 1
+
+    best_streak = max(best_streak, run)
+
+    today_value = date.today()
+    if unique_dates[-1] == today_value:
+        current_streak = 1
+        idx = len(unique_dates) - 1
+        while idx > 0 and unique_dates[idx - 1] == unique_dates[idx] - timedelta(days=1):
+            current_streak += 1
+            idx -= 1
+    else:
+        current_streak = 0
+
+    return current_streak, best_streak
+
+def get_progress_summary(username, timetable_df):
+    ensure_user_data(username)
+
+    if timetable_df is None or timetable_df.empty:
+        return {
+            "completed_sessions": 0,
+            "total_sessions": 0,
+            "completion_percent": 0,
+            "completed_minutes": 0,
+            "total_minutes": 0,
+            "completed_minutes_text": format_minutes(0),
+            "remaining_minutes_text": format_minutes(0),
+            "current_streak": 0,
+            "best_streak": 0,
+            "completed_today": 0,
+            "xp": 0,
+            "level": 1,
+            "xp_to_next_level": 100,
+            "badges": []
+        }
+
+    store = get_completion_store(username)
+    valid_session_ids = set(timetable_df["Session ID"].tolist())
+    completed_ids = [sid for sid in store.keys() if sid in valid_session_ids]
+
+    total_sessions = len(timetable_df)
+    completed_sessions = len(completed_ids)
+    completion_percent = int((completed_sessions / total_sessions) * 100) if total_sessions > 0 else 0
+
+    completed_df = timetable_df[timetable_df["Session ID"].isin(completed_ids)]
+    completed_minutes = int(completed_df["Duration Minutes"].sum()) if not completed_df.empty else 0
+    total_minutes = int(timetable_df["Duration Minutes"].sum()) if not timetable_df.empty else 0
+    remaining_minutes = max(total_minutes - completed_minutes, 0)
+
+    completion_dates = sorted(set(store[sid] for sid in completed_ids if sid in store))
+    current_streak, best_streak = calculate_streaks(completion_dates)
+
+    today_str = date.today().isoformat()
+    completed_today = sum(1 for sid in completed_ids if store.get(sid) == today_str)
+
+    xp = completed_sessions * 20 + best_streak * 10
+    level = (xp // 100) + 1
+    xp_to_next_level = 100 - (xp % 100)
+    badges = get_badges(completed_sessions, current_streak, best_streak, completion_percent)
+
+    return {
+        "completed_sessions": completed_sessions,
+        "total_sessions": total_sessions,
+        "completion_percent": completion_percent,
+        "completed_minutes": completed_minutes,
+        "total_minutes": total_minutes,
+        "completed_minutes_text": format_minutes(completed_minutes),
+        "remaining_minutes_text": format_minutes(remaining_minutes),
+        "current_streak": current_streak,
+        "best_streak": best_streak,
+        "completed_today": completed_today,
+        "xp": xp,
+        "level": level,
+        "xp_to_next_level": xp_to_next_level,
+        "badges": badges
+    }
+
+def get_badges(completed_sessions, current_streak, best_streak, completion_percent):
+    badges = []
+
+    if completed_sessions >= 1:
+        badges.append("🌱 First Session Done")
+    if completed_sessions >= 5:
+        badges.append("📘 5 Sessions Completed")
+    if completed_sessions >= 10:
+        badges.append("🏅 10 Sessions Completed")
+    if current_streak >= 3 or best_streak >= 3:
+        badges.append("🔥 3-Day Streak")
+    if current_streak >= 5 or best_streak >= 5:
+        badges.append("👑 Consistency Queen")
+    if completion_percent >= 50:
+        badges.append("✨ Halfway There")
+    if completion_percent >= 100:
+        badges.append("🎓 Plan Completed")
+
+    return badges
+
+def get_completion_badge(done):
+    if done:
+        return '<span class="done-chip">Completed</span>'
+    return '<span class="pending-chip">Pending</span>'
+
+def mark_all_for_date(username, timetable_df, selected_date, completed=True):
+    daily_df = timetable_df[timetable_df["Calendar Date"] == selected_date]
+    for _, row in daily_df.iterrows():
+        set_session_completed(username, row["Session ID"], completed)
+
+def reset_all_progress(username):
+    ensure_user_data(username)
+    st.session_state.user_progress[username]["completed_sessions"] = {}
+
+# ---------------------------------
+# Download helpers
+# ---------------------------------
 def create_download_text(all_subject_results, summary_values, timetable_df, progress_summary=None):
     output = StringIO()
     output.write("SMART REVISION PLAN\n")
@@ -558,7 +732,9 @@ def create_download_text(all_subject_results, summary_values, timetable_df, prog
         output.write(f"Progress: {progress_summary['completion_percent']}%\n")
         output.write(f"Completed Time: {progress_summary['completed_minutes_text']}\n")
         output.write(f"Current Streak: {progress_summary['current_streak']} day(s)\n")
-        output.write(f"Best Streak: {progress_summary['best_streak']} day(s)\n\n")
+        output.write(f"Best Streak: {progress_summary['best_streak']} day(s)\n")
+        output.write(f"XP: {progress_summary['xp']}\n")
+        output.write(f"Level: {progress_summary['level']}\n\n")
 
     output.write("SUBJECT RANKINGS\n")
     output.write("=" * 50 + "\n")
@@ -586,121 +762,6 @@ def create_download_text(all_subject_results, summary_values, timetable_df, prog
             )
     return output.getvalue()
 
-
-def load_sample_data():
-    return [
-        {"subject_name": "Data Science", "days_left": 7, "topics": [("Data Mining", 5), ("Data Visualization", 2)]},
-        {"subject_name": "Database", "days_left": 14, "topics": [("SQL", 4), ("ERD", 3)]},
-        {"subject_name": "Artificial Intelligence", "days_left": 3, "topics": [("Neural Networks", 5), ("Search Algorithm", 4)]}
-    ]
-
-
-def get_completion_store(username):
-    ensure_user_data(username)
-    return st.session_state.user_progress[username]["completed_sessions"]
-
-
-def get_session_completed(username, session_id):
-    store = get_completion_store(username)
-    return session_id in store
-
-
-def set_session_completed(username, session_id, is_completed):
-    store = get_completion_store(username)
-    if is_completed:
-        store[session_id] = date.today().isoformat()
-    else:
-        if session_id in store:
-            del store[session_id]
-
-
-def get_progress_summary(username, timetable_df):
-    ensure_user_data(username)
-
-    if timetable_df is None or timetable_df.empty:
-        return {
-            "completed_sessions": 0,
-            "total_sessions": 0,
-            "completion_percent": 0,
-            "completed_minutes": 0,
-            "total_minutes": 0,
-            "completed_minutes_text": format_minutes(0),
-            "remaining_minutes_text": format_minutes(0),
-            "current_streak": 0,
-            "best_streak": 0,
-            "completed_today": 0
-        }
-
-    store = get_completion_store(username)
-    valid_session_ids = set(timetable_df["Session ID"].tolist())
-    completed_ids = [sid for sid in store.keys() if sid in valid_session_ids]
-
-    total_sessions = len(timetable_df)
-    completed_sessions = len(completed_ids)
-    completion_percent = int((completed_sessions / total_sessions) * 100) if total_sessions > 0 else 0
-
-    completed_df = timetable_df[timetable_df["Session ID"].isin(completed_ids)]
-    completed_minutes = int(completed_df["Duration Minutes"].sum()) if not completed_df.empty else 0
-    total_minutes = int(timetable_df["Duration Minutes"].sum()) if not timetable_df.empty else 0
-    remaining_minutes = max(total_minutes - completed_minutes, 0)
-
-    completion_dates = sorted(set(store[sid] for sid in completed_ids if sid in store))
-    current_streak, best_streak = calculate_streaks(completion_dates)
-
-    today_str = date.today().isoformat()
-    completed_today = sum(1 for sid in completed_ids if store.get(sid) == today_str)
-
-    return {
-        "completed_sessions": completed_sessions,
-        "total_sessions": total_sessions,
-        "completion_percent": completion_percent,
-        "completed_minutes": completed_minutes,
-        "total_minutes": total_minutes,
-        "completed_minutes_text": format_minutes(completed_minutes),
-        "remaining_minutes_text": format_minutes(remaining_minutes),
-        "current_streak": current_streak,
-        "best_streak": best_streak,
-        "completed_today": completed_today
-    }
-
-
-def calculate_streaks(date_strings):
-    if not date_strings:
-        return 0, 0
-
-    unique_dates = sorted(date.fromisoformat(d) for d in set(date_strings))
-
-    best_streak = 1
-    current_run = 1
-
-    for i in range(1, len(unique_dates)):
-        if unique_dates[i] == unique_dates[i - 1] + timedelta(days=1):
-            current_run += 1
-        else:
-            best_streak = max(best_streak, current_run)
-            current_run = 1
-
-    best_streak = max(best_streak, current_run)
-
-    today_value = date.today()
-    if unique_dates[-1] == today_value:
-        current_streak = 1
-        idx = len(unique_dates) - 1
-        while idx > 0 and unique_dates[idx - 1] == unique_dates[idx] - timedelta(days=1):
-            current_streak += 1
-            idx -= 1
-    else:
-        current_streak = 0
-
-    return current_streak, best_streak
-
-
-def get_completion_badge(done):
-    if done:
-        return '<span class="done-chip">Completed</span>'
-    return '<span class="pending-chip">Pending</span>'
-
-
 # ---------------------------------
 # PDF generation
 # ---------------------------------
@@ -717,7 +778,6 @@ def draw_pdf_background(canvas, doc):
     canvas.setFont("Helvetica-Bold", 10)
     canvas.drawRightString(width - 18 * mm, 8 * mm, f"Page {doc.page}")
     canvas.restoreState()
-
 
 def build_revision_pdf(all_subject_results, summary_values, timetable_df, progress_summary=None):
     buffer = BytesIO()
@@ -779,6 +839,8 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df, progre
             ["Progress", f"{progress_summary['completion_percent']}%"],
             ["Current Streak", f"{progress_summary['current_streak']} day(s)"],
             ["Best Streak", f"{progress_summary['best_streak']} day(s)"],
+            ["XP", str(progress_summary["xp"])],
+            ["Level", str(progress_summary["level"])],
         ])
 
     cover_table = Table(cover_data, colWidths=[55 * mm, 105 * mm])
@@ -878,7 +940,6 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df, progre
     buffer.close()
     return pdf
 
-
 # ---------------------------------
 # Auth UI
 # ---------------------------------
@@ -944,7 +1005,6 @@ def login_view():
                     ensure_user_data(username)
                     st.success("Account created successfully. Please switch to login and sign in.")
 
-
 # ---------------------------------
 # Sidebar navigation
 # ---------------------------------
@@ -978,7 +1038,6 @@ def sidebar_panel():
         st.caption("Short sessions are still productive.")
         st.caption("Consistency beats panic revision.")
 
-
 # ---------------------------------
 # Pages
 # ---------------------------------
@@ -995,6 +1054,8 @@ def home_page():
     """, unsafe_allow_html=True)
 
     progress_summary = None
+    settings = st.session_state.user_settings[st.session_state.username]
+
     if st.session_state.last_plan_data:
         progress_summary = get_progress_summary(
             st.session_state.username,
@@ -1006,7 +1067,7 @@ def home_page():
         st.markdown("""
         <div class="mini-card">
             <h4>🌷 What you can do here</h4>
-            <p>Create smart study plans, detect your weakest topics, build a timetable, track progress, and export your results.</p>
+            <p>Create smart study plans, track session progress, build streaks, earn badges, and export your results.</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -1016,7 +1077,7 @@ def home_page():
         st.markdown(f"""
         <div class="mini-card">
             <h4>📌 Your activity</h4>
-            <p>You have <b>{history_count}</b> saved planner entr{'y' if history_count == 1 else 'ies'}.</p>
+            <p>You have <b>{history_count}</b> saved planner entries.</p>
             <p>Your current streak is <b>{streak_text}</b>.</p>
         </div>
         """, unsafe_allow_html=True)
@@ -1026,26 +1087,61 @@ def home_page():
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Completed Sessions", f"{progress_summary['completed_sessions']}/{progress_summary['total_sessions']}")
         m2.metric("Progress", f"{progress_summary['completion_percent']}%")
-        m3.metric("Completed Time", progress_summary["completed_minutes_text"])
-        m4.metric("Streak", f"{progress_summary['current_streak']} day(s)")
+        m3.metric("Level", progress_summary["level"])
+        m4.metric("XP", progress_summary["xp"])
+
+        st.markdown(
+            f"<div class='feedback-box'><b>Motivation:</b><br>{get_motivation_message(settings['motivational_mode'], progress_summary['completion_percent'], progress_summary['current_streak'])}</div>",
+            unsafe_allow_html=True
+        )
 
     if st.button("Go to Planner", type="primary"):
         st.session_state.current_page = "Planner"
         st.rerun()
 
-
 def profile_page():
     ensure_user_data(st.session_state.username)
 
-    st.subheader("👤 Profile")
+    st.subheader("👤 Profile & Settings")
+    settings = st.session_state.user_settings[st.session_state.username]
+
     st.markdown(f"""
     <div class="profile-box">
         <h4>Account Details</h4>
         <p><b>Full Name:</b> {st.session_state.full_name}</p>
         <p><b>Username:</b> {st.session_state.username}</p>
-        <p><b>Account Type:</b> Demo User</p>
+        <p><b>Theme:</b> {settings['theme_name']}</p>
     </div>
     """, unsafe_allow_html=True)
+
+    st.markdown("<div class='settings-box'><h4>Study Preferences</h4></div>", unsafe_allow_html=True)
+
+    session_length = st.selectbox(
+        "Preferred session length (minutes)",
+        [30, 45, 60, 90],
+        index=[30, 45, 60, 90].index(settings["preferred_session_length"])
+    )
+
+    daily_goal = st.number_input(
+        "Daily study goal (minutes)",
+        min_value=30,
+        max_value=600,
+        value=settings["daily_study_goal_minutes"],
+        step=30
+    )
+
+    motivational_mode = st.selectbox(
+        "Motivational mode",
+        ["Cute", "Strict", "Balanced"],
+        index=["Cute", "Strict", "Balanced"].index(settings["motivational_mode"])
+    )
+
+    if st.button("Save Preferences", type="primary"):
+        st.session_state.user_settings[st.session_state.username]["preferred_session_length"] = session_length
+        st.session_state.user_settings[st.session_state.username]["daily_study_goal_minutes"] = daily_goal
+        st.session_state.user_settings[st.session_state.username]["motivational_mode"] = motivational_mode
+        st.success("Preferences saved successfully.")
+        st.rerun()
 
     if st.session_state.last_plan_data:
         progress_summary = get_progress_summary(
@@ -1053,41 +1149,50 @@ def profile_page():
             st.session_state.last_plan_data["timetable_df"]
         )
 
-        st.markdown("""
-        <div class="profile-box">
-            <h4>Study Progress Summary</h4>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("<hr>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='level-box'><h4>⭐ Your Study Level</h4><p><b>Level {progress_summary['level']}</b> • XP: <b>{progress_summary['xp']}</b> • XP to next level: <b>{progress_summary['xp_to_next_level']}</b></p></div>",
+            unsafe_allow_html=True
+        )
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Current Streak", f"{progress_summary['current_streak']} day(s)")
-        c2.metric("Best Streak", f"{progress_summary['best_streak']} day(s)")
-        c3.metric("Completed Today", progress_summary["completed_today"])
-
+        st.markdown("### 🏆 Earned Badges")
+        if progress_summary["badges"]:
+            for badge in progress_summary["badges"]:
+                st.markdown(f"<div class='badge-box'>{badge}</div>", unsafe_allow_html=True)
+        else:
+            st.info("No badges yet. Complete sessions to unlock them.")
 
 def history_page():
     ensure_user_data(st.session_state.username)
 
     st.subheader("🕰 Planner History")
     history = st.session_state.planner_history.get(st.session_state.username, [])
+
     if history:
         history_df = pd.DataFrame(history)
         st.dataframe(history_df, use_container_width=True, hide_index=True)
 
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            if st.button("Clear History"):
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Delete Latest History Entry"):
+                if st.session_state.planner_history[st.session_state.username]:
+                    st.session_state.planner_history[st.session_state.username].pop()
+                    st.success("Latest history entry deleted.")
+                    st.rerun()
+
+        with c2:
+            if st.button("Clear All History"):
                 st.session_state.planner_history[st.session_state.username] = []
-                st.success("Planner history cleared.")
+                st.success("All planner history cleared.")
                 st.rerun()
     else:
         st.info("No planner history saved yet. Generate a plan first.")
-
 
 def planner_page():
     ensure_user_data(st.session_state.username)
 
     st.subheader("🧠 Build Your Revision Plan")
+    settings = st.session_state.user_settings[st.session_state.username]
 
     top_col1, top_col2, top_col3 = st.columns([1, 1, 1])
     with top_col1:
@@ -1180,7 +1285,11 @@ def planner_page():
 
         all_subject_results = result["all_subject_results"]
         topic_df = flatten_topics(all_subject_results)
-        timetable_df = generate_study_timetable(topic_df, start_date=date.today())
+        timetable_df = generate_study_timetable(
+            topic_df,
+            start_date=date.today(),
+            preferred_session_length=settings["preferred_session_length"]
+        )
         today_focus = get_today_focus(topic_df)
 
         total_topics = len(topic_df)
@@ -1243,13 +1352,20 @@ def planner_page():
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    p1, p2, p3, p4 = st.columns(4)
-    p1.metric("Completed Sessions", f"{progress_summary['completed_sessions']}/{progress_summary['total_sessions']}")
+    p1, p2, p3, p4, p5 = st.columns(5)
+    p1.metric("Completed", f"{progress_summary['completed_sessions']}/{progress_summary['total_sessions']}")
     p2.metric("Progress", f"{progress_summary['completion_percent']}%")
-    p3.metric("Completed Time", progress_summary["completed_minutes_text"])
-    p4.metric("Current Streak", f"{progress_summary['current_streak']} day(s)")
+    p3.metric("XP", progress_summary["xp"])
+    p4.metric("Level", progress_summary["level"])
+    p5.metric("Streak", f"{progress_summary['current_streak']} day(s)")
 
     st.progress(progress_summary["completion_percent"] / 100)
+
+    settings = st.session_state.user_settings[st.session_state.username]
+    st.markdown(
+        f"<div class='feedback-box'><b>Motivation:</b><br>{get_motivation_message(settings['motivational_mode'], progress_summary['completion_percent'], progress_summary['current_streak'])}</div>",
+        unsafe_allow_html=True
+    )
 
     mini1, mini2 = st.columns(2)
     with mini1:
@@ -1294,7 +1410,6 @@ def planner_page():
             st.markdown("<div class='section-card'><b>Workload by Subject</b></div>", unsafe_allow_html=True)
             workload_df = get_workload_by_subject(topic_df)
             st.bar_chart(workload_df.set_index("Subject"))
-
         with low2:
             st.markdown("<div class='section-card'><b>Focus Distribution</b></div>", unsafe_allow_html=True)
             focus_df = get_focus_distribution(topic_df)
@@ -1312,9 +1427,16 @@ def planner_page():
             unsafe_allow_html=True
         )
         extra3.markdown(
-            f"<div class='progress-card'><h4>📍 Completed Today</h4><p><b>{progress_summary['completed_today']}</b> session(s)</p></div>",
+            f"<div class='progress-card'><h4>🎖 Badges</h4><p><b>{len(progress_summary['badges'])}</b> unlocked</p></div>",
             unsafe_allow_html=True
         )
+
+        st.markdown("### 🏅 Badges")
+        if progress_summary["badges"]:
+            for badge in progress_summary["badges"]:
+                st.markdown(f"<div class='badge-box'>{badge}</div>", unsafe_allow_html=True)
+        else:
+            st.info("Complete sessions to unlock badges.")
 
     with tab2:
         st.markdown("### ✅ Daily Study Checklist")
@@ -1328,6 +1450,23 @@ def planner_page():
             options=available_dates,
             index=default_index
         )
+
+        action1, action2, action3 = st.columns(3)
+        with action1:
+            if st.button("Mark All Completed"):
+                mark_all_for_date(st.session_state.username, timetable_df, selected_date, completed=True)
+                st.success("All sessions for selected date marked completed.")
+                st.rerun()
+        with action2:
+            if st.button("Unmark All"):
+                mark_all_for_date(st.session_state.username, timetable_df, selected_date, completed=False)
+                st.success("All sessions for selected date unmarked.")
+                st.rerun()
+        with action3:
+            if st.button("Reset All Progress"):
+                reset_all_progress(st.session_state.username)
+                st.success("All progress has been reset.")
+                st.rerun()
 
         daily_df = timetable_df[timetable_df["Calendar Date"] == selected_date].copy()
 
@@ -1427,7 +1566,6 @@ def planner_page():
             )
             st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-
 def downloads_page():
     ensure_user_data(st.session_state.username)
 
@@ -1456,10 +1594,11 @@ def downloads_page():
         unsafe_allow_html=True
     )
 
-    p1, p2, p3 = st.columns(3)
+    p1, p2, p3, p4 = st.columns(4)
     p1.metric("Progress", f"{progress_summary['completion_percent']}%")
     p2.metric("Completed Sessions", f"{progress_summary['completed_sessions']}/{progress_summary['total_sessions']}")
     p3.metric("Current Streak", f"{progress_summary['current_streak']} day(s)")
+    p4.metric("Level", progress_summary["level"])
 
     pdf_bytes = build_revision_pdf(all_subject_results, summary_values, timetable_df, progress_summary)
     txt_data = create_download_text(all_subject_results, summary_values, timetable_df, progress_summary)
@@ -1501,7 +1640,6 @@ def downloads_page():
         file_name="study_timetable.csv",
         mime="text/csv"
     )
-
 
 # ---------------------------------
 # Run app
