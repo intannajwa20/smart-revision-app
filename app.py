@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from io import StringIO, BytesIO
 from datetime import datetime, date, timedelta
+import json
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -241,6 +242,13 @@ st.markdown("""
     background: rgba(255,255,255,0.03);
     border: 1px solid rgba(255,255,255,0.06);
     margin-bottom: 1rem;
+}
+.history-card {
+    padding: 1rem 1.2rem;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    margin-bottom: 0.8rem;
 }
 hr {
     border: none;
@@ -547,24 +555,66 @@ def get_today_focus(topic_df):
         "reason": "High weakness and closer exam date."
     }
 
-def save_history_entry(username, summary_values):
+def build_plan_snapshot(username, summary_values, subjects_data, all_subject_results, topic_df, timetable_df, today_focus):
+    progress_store = st.session_state.user_progress.get(username, {}).get("completed_sessions", {})
+    relevant_session_ids = set(timetable_df["Session ID"].tolist()) if not timetable_df.empty else set()
+
+    relevant_progress = {
+        sid: progress_store[sid]
+        for sid in progress_store
+        if sid in relevant_session_ids
+    }
+
+    return {
+        "plan_id": datetime.now().strftime("%Y%m%d%H%M%S"),
+        "saved_at": datetime.now().strftime("%d %b %Y, %I:%M %p"),
+        "summary_values": summary_values,
+        "subjects_data": subjects_data,
+        "all_subject_results": all_subject_results,
+        "topic_df": topic_df.to_dict(orient="records"),
+        "timetable_df": timetable_df.to_dict(orient="records"),
+        "today_focus": today_focus,
+        "progress_snapshot": relevant_progress
+    }
+
+def save_full_plan_entry(username, plan_snapshot):
     ensure_user_data(username)
+    st.session_state.planner_history[username].append(plan_snapshot)
 
-    st.session_state.planner_history[username].append({
-        "date": datetime.now().strftime("%d %b %Y, %I:%M %p"),
-        "top_subject": summary_values["most_prioritized_subject"],
-        "weakest_topic": summary_values["weakest_topic"],
-        "total_topics": summary_values["total_topics"],
-        "study_time": summary_values["total_study_time"],
-        "readiness": f"{summary_values['overall_readiness']}%"
-    })
+def load_plan_into_session(plan_entry):
+    topic_df = pd.DataFrame(plan_entry.get("topic_df", []))
+    timetable_df = pd.DataFrame(plan_entry.get("timetable_df", []))
 
-def load_sample_data():
-    return [
-        {"subject_name": "Data Science", "days_left": 7, "topics": [("Data Mining", 5), ("Data Visualization", 2)]},
-        {"subject_name": "Database", "days_left": 14, "topics": [("SQL", 4), ("ERD", 3)]},
-        {"subject_name": "Artificial Intelligence", "days_left": 3, "topics": [("Neural Networks", 5), ("Search Algorithm", 4)]}
-    ]
+    st.session_state.last_plan_data = {
+        "all_subject_results": plan_entry.get("all_subject_results", []),
+        "topic_df": topic_df,
+        "timetable_df": timetable_df,
+        "summary_values": plan_entry.get("summary_values", {}),
+        "today_focus": plan_entry.get("today_focus"),
+        "generated_on": plan_entry.get("saved_at", "")
+    }
+
+    if st.session_state.username not in st.session_state.user_progress:
+        ensure_user_data(st.session_state.username)
+
+    st.session_state.user_progress[st.session_state.username]["completed_sessions"] = plan_entry.get("progress_snapshot", {}).copy()
+
+def export_plan_json(plan_entry):
+    return json.dumps(plan_entry, indent=2).encode("utf-8")
+
+def import_plan_json(uploaded_file):
+    try:
+        content = uploaded_file.read().decode("utf-8")
+        plan_data = json.loads(content)
+        required_keys = [
+            "plan_id", "saved_at", "summary_values", "subjects_data",
+            "all_subject_results", "topic_df", "timetable_df"
+        ]
+        if not all(key in plan_data for key in required_keys):
+            return None, "Invalid JSON file structure."
+        return plan_data, None
+    except Exception as e:
+        return None, f"Failed to import JSON: {str(e)}"
 
 # ---------------------------------
 # Progress / streak / XP / badges
@@ -590,7 +640,6 @@ def calculate_streaks(date_strings):
         return 0, 0
 
     unique_dates = sorted(date.fromisoformat(d) for d in set(date_strings))
-
     best_streak = 1
     run = 1
 
@@ -614,6 +663,26 @@ def calculate_streaks(date_strings):
         current_streak = 0
 
     return current_streak, best_streak
+
+def get_badges(completed_sessions, current_streak, best_streak, completion_percent):
+    badges = []
+
+    if completed_sessions >= 1:
+        badges.append("🌱 First Session Done")
+    if completed_sessions >= 5:
+        badges.append("📘 5 Sessions Completed")
+    if completed_sessions >= 10:
+        badges.append("🏅 10 Sessions Completed")
+    if current_streak >= 3 or best_streak >= 3:
+        badges.append("🔥 3-Day Streak")
+    if current_streak >= 5 or best_streak >= 5:
+        badges.append("👑 Consistency Queen")
+    if completion_percent >= 50:
+        badges.append("✨ Halfway There")
+    if completion_percent >= 100:
+        badges.append("🎓 Plan Completed")
+
+    return badges
 
 def get_progress_summary(username, timetable_df):
     ensure_user_data(username)
@@ -676,26 +745,6 @@ def get_progress_summary(username, timetable_df):
         "xp_to_next_level": xp_to_next_level,
         "badges": badges
     }
-
-def get_badges(completed_sessions, current_streak, best_streak, completion_percent):
-    badges = []
-
-    if completed_sessions >= 1:
-        badges.append("🌱 First Session Done")
-    if completed_sessions >= 5:
-        badges.append("📘 5 Sessions Completed")
-    if completed_sessions >= 10:
-        badges.append("🏅 10 Sessions Completed")
-    if current_streak >= 3 or best_streak >= 3:
-        badges.append("🔥 3-Day Streak")
-    if current_streak >= 5 or best_streak >= 5:
-        badges.append("👑 Consistency Queen")
-    if completion_percent >= 50:
-        badges.append("✨ Halfway There")
-    if completion_percent >= 100:
-        badges.append("🎓 Plan Completed")
-
-    return badges
 
 def get_completion_badge(done):
     if done:
@@ -1067,7 +1116,7 @@ def home_page():
         st.markdown("""
         <div class="mini-card">
             <h4>🌷 What you can do here</h4>
-            <p>Create smart study plans, track session progress, build streaks, earn badges, and export your results.</p>
+            <p>Create smart study plans, save full plans, reopen old plans, import/export JSON, track progress, and export reports.</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -1077,7 +1126,7 @@ def home_page():
         st.markdown(f"""
         <div class="mini-card">
             <h4>📌 Your activity</h4>
-            <p>You have <b>{history_count}</b> saved planner entries.</p>
+            <p>You have <b>{history_count}</b> saved full plans.</p>
             <p>Your current streak is <b>{streak_text}</b>.</p>
         </div>
         """, unsafe_allow_html=True)
@@ -1165,28 +1214,66 @@ def profile_page():
 def history_page():
     ensure_user_data(st.session_state.username)
 
-    st.subheader("🕰 Planner History")
+    st.subheader("🕰 Saved Plans")
     history = st.session_state.planner_history.get(st.session_state.username, [])
 
-    if history:
-        history_df = pd.DataFrame(history)
-        st.dataframe(history_df, use_container_width=True, hide_index=True)
+    upload_file = st.file_uploader("Import full plan JSON", type=["json"])
+    if upload_file is not None:
+        imported_plan, error = import_plan_json(upload_file)
+        if error:
+            st.error(error)
+        else:
+            st.session_state.planner_history[st.session_state.username].append(imported_plan)
+            st.success("Plan imported successfully.")
+            st.rerun()
 
-        c1, c2 = st.columns(2)
+    if not history:
+        st.info("No saved plans yet. Generate a plan first.")
+        return
+
+    for idx, plan in enumerate(reversed(history)):
+        actual_index = len(history) - 1 - idx
+        summary = plan.get("summary_values", {})
+
+        st.markdown("<div class='history-card'>", unsafe_allow_html=True)
+        st.markdown(f"### 📘 Plan {actual_index + 1}")
+        st.write(f"**Saved at:** {plan.get('saved_at', '-')}")
+        st.write(f"**Top Subject:** {summary.get('most_prioritized_subject', '-')}")
+        st.write(f"**Weakest Topic:** {summary.get('weakest_topic', '-')}")
+        st.write(f"**Total Topics:** {summary.get('total_topics', '-')}")
+        st.write(f"**Study Time:** {summary.get('total_study_time', '-')}")
+        st.write(f"**Readiness:** {summary.get('overall_readiness', '-')}%")
+
+        c1, c2, c3 = st.columns(3)
         with c1:
-            if st.button("Delete Latest History Entry"):
-                if st.session_state.planner_history[st.session_state.username]:
-                    st.session_state.planner_history[st.session_state.username].pop()
-                    st.success("Latest history entry deleted.")
-                    st.rerun()
+            if st.button(f"Open Plan {actual_index}", key=f"open_{actual_index}"):
+                load_plan_into_session(plan)
+                st.session_state.current_page = "Planner"
+                st.success("Plan loaded successfully.")
+                st.rerun()
 
         with c2:
-            if st.button("Clear All History"):
-                st.session_state.planner_history[st.session_state.username] = []
-                st.success("All planner history cleared.")
+            json_bytes = export_plan_json(plan)
+            st.download_button(
+                label=f"Export JSON {actual_index}",
+                data=json_bytes,
+                file_name=f"smart_revision_plan_{plan.get('plan_id', actual_index)}.json",
+                mime="application/json",
+                key=f"export_{actual_index}"
+            )
+
+        with c3:
+            if st.button(f"Delete Plan {actual_index}", key=f"delete_{actual_index}"):
+                st.session_state.planner_history[st.session_state.username].pop(actual_index)
+                st.success("Plan deleted successfully.")
                 st.rerun()
-    else:
-        st.info("No planner history saved yet. Generate a plan first.")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    if st.button("Clear All Saved Plans"):
+        st.session_state.planner_history[st.session_state.username] = []
+        st.success("All saved plans cleared.")
+        st.rerun()
 
 def planner_page():
     ensure_user_data(st.session_state.username)
@@ -1310,7 +1397,6 @@ def planner_page():
             "overall_readiness": overall_readiness
         }
 
-        save_history_entry(st.session_state.username, summary_values)
         st.session_state.user_progress[st.session_state.username]["plans_generated"] += 1
 
         st.session_state.last_plan_data = {
@@ -1322,10 +1408,21 @@ def planner_page():
             "generated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
+        plan_snapshot = build_plan_snapshot(
+            st.session_state.username,
+            summary_values,
+            subjects_data,
+            all_subject_results,
+            topic_df,
+            timetable_df,
+            today_focus
+        )
+        save_full_plan_entry(st.session_state.username, plan_snapshot)
+
         if overall_readiness >= 80 and show_fun_mode:
             st.balloons()
 
-        st.success("Your smart revision plan has been generated and saved.")
+        st.success("Your smart revision plan has been generated and saved as a full reusable plan.")
         st.rerun()
 
     plan = st.session_state.last_plan_data
@@ -1361,7 +1458,6 @@ def planner_page():
 
     st.progress(progress_summary["completion_percent"] / 100)
 
-    settings = st.session_state.user_settings[st.session_state.username]
     st.markdown(
         f"<div class='feedback-box'><b>Motivation:</b><br>{get_motivation_message(settings['motivational_mode'], progress_summary['completion_percent'], progress_summary['current_streak'])}</div>",
         unsafe_allow_html=True
