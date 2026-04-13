@@ -364,12 +364,23 @@ def get_motivation_message(mode, progress_percent, streak):
         if progress_percent >= 50:
             return "✨ You’re making beautiful progress. Don’t stop now."
         return "🫶 Small steps still count. Just begin."
+
     if mode == "Strict":
         if progress_percent >= 80:
             return "Good. Stay disciplined and finish strong."
         if progress_percent >= 50:
             return "You’re halfway there. No slacking."
         return "Focus. The work will not do itself."
+
+    if mode == "Brutal":
+        if progress_percent >= 80:
+            return "💀 Wow. Look at you being productive for once. Finish the job."
+        if progress_percent >= 50:
+            return "⚔️ Not bad. But don’t celebrate like you’ve graduated already."
+        if streak >= 3:
+            return "🔥 A streak? Suspiciously impressive. Keep moving before the laziness returns."
+        return "🚨 Babe, the exam is not scared of you yet. Open the notes and fight back."
+
     if streak >= 3:
         return "🔥 Consistency looks good on you."
     return "📚 One focused session can change your whole day."
@@ -761,6 +772,96 @@ def reset_all_progress(username):
     st.session_state.user_progress[username]["completed_sessions"] = {}
 
 # ---------------------------------
+# Calendar / filter helpers
+# ---------------------------------
+def enrich_timetable_status(username, timetable_df):
+    if timetable_df is None or timetable_df.empty:
+        return pd.DataFrame()
+
+    df = timetable_df.copy()
+    today_str = date.today().strftime("%Y-%m-%d")
+
+    def get_status(row):
+        completed = get_session_completed(username, row["Session ID"])
+        if completed:
+            return "Completed"
+        if row["Calendar Date"] < today_str:
+            return "Overdue"
+        if row["Calendar Date"] == today_str:
+            return "Today"
+        return "Upcoming"
+
+    df["Status"] = df.apply(get_status, axis=1)
+    return df
+
+def get_overdue_sessions(username, timetable_df):
+    if timetable_df is None or timetable_df.empty:
+        return pd.DataFrame()
+
+    enriched = enrich_timetable_status(username, timetable_df)
+    return enriched[enriched["Status"] == "Overdue"].copy()
+
+def get_today_sessions(username, timetable_df):
+    if timetable_df is None or timetable_df.empty:
+        return pd.DataFrame()
+
+    enriched = enrich_timetable_status(username, timetable_df)
+    return enriched[enriched["Status"] == "Today"].copy()
+
+def filter_timetable_df(df, subject_filter="All", status_filter="All", search_text=""):
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    filtered = df.copy()
+
+    if subject_filter != "All":
+        filtered = filtered[filtered["Subject"] == subject_filter]
+
+    if status_filter != "All":
+        filtered = filtered[filtered["Status"] == status_filter]
+
+    if search_text.strip():
+        q = search_text.strip().lower()
+        filtered = filtered[
+            filtered["Subject"].str.lower().str.contains(q, na=False) |
+            filtered["Topic"].str.lower().str.contains(q, na=False) |
+            filtered["Study Method"].str.lower().str.contains(q, na=False) |
+            filtered["Session ID"].str.lower().str.contains(q, na=False)
+        ]
+
+    return filtered
+
+def build_calendar_view(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    cal = df.groupby("Calendar Date").agg(
+        Sessions=("Session ID", "count"),
+        Subjects=("Subject", lambda x: ", ".join(sorted(set(x)))),
+        Overdue=("Status", lambda x: int((x == "Overdue").sum())),
+        Today=("Status", lambda x: int((x == "Today").sum())),
+        Completed=("Status", lambda x: int((x == "Completed").sum())),
+        Upcoming=("Status", lambda x: int((x == "Upcoming").sum()))
+    ).reset_index()
+
+    return cal
+
+def get_daily_goal_progress(username, timetable_df, daily_goal_minutes):
+    if timetable_df is None or timetable_df.empty:
+        return 0, 0
+
+    store = get_completion_store(username)
+    today_str = date.today().isoformat()
+
+    completed_today_ids = [sid for sid, dt in store.items() if dt == today_str]
+    completed_today_df = timetable_df[timetable_df["Session ID"].isin(completed_today_ids)]
+
+    completed_minutes_today = int(completed_today_df["Duration Minutes"].sum()) if not completed_today_df.empty else 0
+    percent = min(int((completed_minutes_today / daily_goal_minutes) * 100), 100) if daily_goal_minutes > 0 else 0
+
+    return completed_minutes_today, percent
+
+# ---------------------------------
 # Download helpers
 # ---------------------------------
 def create_download_text(all_subject_results, summary_values, timetable_df, progress_summary=None):
@@ -1144,6 +1245,26 @@ def home_page():
             unsafe_allow_html=True
         )
 
+        if st.session_state.last_plan_data:
+            timetable_df = st.session_state.last_plan_data["timetable_df"]
+            overdue_df = get_overdue_sessions(st.session_state.username, timetable_df)
+            today_df = get_today_sessions(st.session_state.username, timetable_df)
+
+            daily_goal_minutes = settings["daily_study_goal_minutes"]
+            done_today_minutes, goal_percent = get_daily_goal_progress(
+                st.session_state.username,
+                timetable_df,
+                daily_goal_minutes
+            )
+
+            st.markdown("<hr>", unsafe_allow_html=True)
+            d1, d2, d3 = st.columns(3)
+            d1.metric("Overdue Sessions", len(overdue_df))
+            d2.metric("Today's Sessions", len(today_df))
+            d3.metric("Daily Goal", f"{done_today_minutes}/{daily_goal_minutes} min")
+
+            st.progress(goal_percent / 100)
+
     if st.button("Go to Planner", type="primary"):
         st.session_state.current_page = "Planner"
         st.rerun()
@@ -1179,10 +1300,13 @@ def profile_page():
         step=30
     )
 
+    mode_options = ["Cute", "Strict", "Balanced", "Brutal"]
+    current_mode = settings["motivational_mode"] if settings["motivational_mode"] in mode_options else "Cute"
+
     motivational_mode = st.selectbox(
         "Motivational mode",
-        ["Cute", "Strict", "Balanced"],
-        index=["Cute", "Strict", "Balanced"].index(settings["motivational_mode"])
+        mode_options,
+        index=mode_options.index(current_mode)
     )
 
     if st.button("Save Preferences", type="primary"):
@@ -1477,11 +1601,12 @@ def planner_page():
                 unsafe_allow_html=True
             )
 
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🌟 Dashboard",
         "✅ Daily Checklist",
         "📌 Subjects",
-        "🗓 Timetable"
+        "🗓 Timetable",
+        "📅 Calendar View"
     ])
 
     with tab1:
@@ -1534,8 +1659,41 @@ def planner_page():
         else:
             st.info("Complete sessions to unlock badges.")
 
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        overdue_df = get_overdue_sessions(st.session_state.username, timetable_df)
+        today_df = get_today_sessions(st.session_state.username, timetable_df)
+        done_today_minutes, goal_percent = get_daily_goal_progress(
+            st.session_state.username,
+            timetable_df,
+            settings["daily_study_goal_minutes"]
+        )
+
+        s1, s2, s3 = st.columns(3)
+        s1.markdown(
+            f"<div class='progress-card'><h4>⏰ Overdue Sessions</h4><p><b>{len(overdue_df)}</b></p></div>",
+            unsafe_allow_html=True
+        )
+        s2.markdown(
+            f"<div class='progress-card'><h4>📍 Today's Sessions</h4><p><b>{len(today_df)}</b></p></div>",
+            unsafe_allow_html=True
+        )
+        s3.markdown(
+            f"<div class='progress-card'><h4>🎯 Daily Goal</h4><p><b>{done_today_minutes}/{settings['daily_study_goal_minutes']} min</b></p></div>",
+            unsafe_allow_html=True
+        )
+
+        st.progress(goal_percent / 100)
+
+        if not overdue_df.empty:
+            st.warning(f"You have {len(overdue_df)} overdue session(s). Time to catch up.")
+
     with tab2:
         st.markdown("### ✅ Daily Study Checklist")
+
+        overdue_df = get_overdue_sessions(st.session_state.username, timetable_df)
+        if not overdue_df.empty:
+            st.warning(f"You currently have {len(overdue_df)} overdue session(s).")
 
         available_dates = sorted(timetable_df["Calendar Date"].unique().tolist())
         today_str = date.today().strftime("%Y-%m-%d")
@@ -1656,11 +1814,66 @@ def planner_page():
         if timetable_df.empty:
             st.info("No timetable generated.")
         else:
-            display_df = timetable_df.copy()
-            display_df["Completed"] = display_df["Session ID"].apply(
-                lambda x: "Yes" if get_session_completed(st.session_state.username, x) else "No"
+            enriched_df = enrich_timetable_status(st.session_state.username, timetable_df)
+
+            filter_col1, filter_col2, filter_col3 = st.columns(3)
+            with filter_col1:
+                subject_options = ["All"] + sorted(enriched_df["Subject"].dropna().unique().tolist())
+                selected_subject = st.selectbox("Filter by subject", subject_options)
+
+            with filter_col2:
+                status_options = ["All", "Completed", "Overdue", "Today", "Upcoming"]
+                selected_status = st.selectbox("Filter by status", status_options)
+
+            with filter_col3:
+                search_text = st.text_input("Search timetable", placeholder="Search topic, subject, method, session ID")
+
+            filtered_df = filter_timetable_df(
+                enriched_df,
+                subject_filter=selected_subject,
+                status_filter=selected_status,
+                search_text=search_text
             )
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+            if filtered_df.empty:
+                st.info("No timetable rows match your filters.")
+            else:
+                st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+
+    with tab5:
+        if timetable_df.empty:
+            st.info("No timetable generated.")
+        else:
+            enriched_df = enrich_timetable_status(st.session_state.username, timetable_df)
+            calendar_df = build_calendar_view(enriched_df)
+
+            st.markdown("### 📅 Calendar-Style Timetable Overview")
+
+            if calendar_df.empty:
+                st.info("No calendar data available.")
+            else:
+                st.dataframe(calendar_df, use_container_width=True, hide_index=True)
+
+            st.markdown("<hr>", unsafe_allow_html=True)
+            st.markdown("### Select a Date to View Sessions")
+
+            available_dates = sorted(enriched_df["Calendar Date"].unique().tolist())
+            today_str = date.today().strftime("%Y-%m-%d")
+            default_index = available_dates.index(today_str) if today_str in available_dates else 0
+
+            selected_calendar_date = st.selectbox(
+                "Choose calendar date",
+                options=available_dates,
+                index=default_index,
+                key="calendar_date_view"
+            )
+
+            selected_day_df = enriched_df[enriched_df["Calendar Date"] == selected_calendar_date].copy()
+
+            if selected_day_df.empty:
+                st.info("No sessions scheduled for this date.")
+            else:
+                st.dataframe(selected_day_df, use_container_width=True, hide_index=True)
 
 def downloads_page():
     ensure_user_data(st.session_state.username)
@@ -1698,11 +1911,12 @@ def downloads_page():
 
     pdf_bytes = build_revision_pdf(all_subject_results, summary_values, timetable_df, progress_summary)
     txt_data = create_download_text(all_subject_results, summary_values, timetable_df, progress_summary)
-    csv_data = timetable_df.assign(
-        Completed=timetable_df["Session ID"].apply(
-            lambda x: "Yes" if get_session_completed(st.session_state.username, x) else "No"
-        )
-    ).to_csv(index=False).encode("utf-8")
+
+    enriched_csv_df = enrich_timetable_status(st.session_state.username, timetable_df)
+    enriched_csv_df["Completed"] = enriched_csv_df["Session ID"].apply(
+        lambda x: "Yes" if get_session_completed(st.session_state.username, x) else "No"
+    )
+    csv_data = enriched_csv_df.to_csv(index=False).encode("utf-8")
 
     st.markdown(
         "<div class='download-card'><b>📄 PDF Version</b><br>Best for presentation or saving a polished report.</div>",
