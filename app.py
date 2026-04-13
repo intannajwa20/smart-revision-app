@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from io import StringIO, BytesIO
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -51,6 +51,12 @@ if "current_page" not in st.session_state:
 
 if "last_plan_data" not in st.session_state:
     st.session_state.last_plan_data = None
+
+if "session_completion" not in st.session_state:
+    st.session_state.session_completion = {}
+
+if "user_progress" not in st.session_state:
+    st.session_state.user_progress = {}
 
 # ---------------------------------
 # Styling
@@ -196,9 +202,37 @@ st.markdown("""
     border: 1px solid rgba(255,255,255,0.06);
     margin-bottom: 1rem;
 }
-.nav-note {
-    font-size: 0.9rem;
-    color: #cabde6;
+.progress-card {
+    padding: 1rem 1.2rem;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    margin-bottom: 1rem;
+}
+.checklist-card {
+    padding: 1rem 1.1rem;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.025);
+    border: 1px solid rgba(255,255,255,0.07);
+    margin-bottom: 0.7rem;
+}
+.done-chip {
+    display: inline-block;
+    padding: 0.24rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    background: rgba(75, 192, 192, 0.14);
+    border: 1px solid rgba(75, 192, 192, 0.26);
+}
+.pending-chip {
+    display: inline-block;
+    padding: 0.24rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    background: rgba(255, 206, 86, 0.12);
+    border: 1px solid rgba(255, 206, 86, 0.26);
 }
 hr {
     border: none;
@@ -211,6 +245,17 @@ hr {
 # ---------------------------------
 # Helper functions
 # ---------------------------------
+def ensure_user_data(username):
+    if username not in st.session_state.planner_history:
+        st.session_state.planner_history[username] = []
+
+    if username not in st.session_state.user_progress:
+        st.session_state.user_progress[username] = {
+            "completed_sessions": {},
+            "plans_generated": 0
+        }
+
+
 def convert_to_days(value, unit):
     if unit == "Day(s)":
         return int(value)
@@ -219,6 +264,7 @@ def convert_to_days(value, unit):
     if unit == "Month(s)":
         return int(value * 30)
     return int(value)
+
 
 def format_minutes(minutes):
     hours = minutes // 60
@@ -229,8 +275,10 @@ def format_minutes(minutes):
         return f"{int(hours)} hour(s)"
     return f"{int(remaining_minutes)} minute(s)"
 
+
 def shorten_text(text, max_len=14):
     return text if len(text) <= max_len else text[:max_len] + "..."
+
 
 def get_priority_details(days_left):
     if days_left <= 3:
@@ -242,6 +290,7 @@ def get_priority_details(days_left):
     elif days_left <= 30:
         return "Low", 2, 20
     return "Very Low", 1, 15
+
 
 def get_study_method(weakness_level):
     if weakness_level >= 4:
@@ -262,11 +311,13 @@ def get_study_method(weakness_level):
         "Try a quick quiz, skim notes, or make a simple mind map."
     )
 
+
 def calculate_readiness_score(days_left, avg_weakness):
     time_factor = min(days_left / 30, 1.0) * 50
     weakness_factor = ((6 - avg_weakness) / 5) * 50
     score = int(time_factor + weakness_factor)
     return max(0, min(score, 100))
+
 
 def get_readiness_status(score):
     if score >= 80:
@@ -277,6 +328,7 @@ def get_readiness_status(score):
         return "Needs Work"
     return "Focus Now"
 
+
 def get_study_mood(score):
     if score >= 80:
         return "🌸 You’re in great shape"
@@ -286,12 +338,14 @@ def get_study_mood(score):
         return "🫧 You need a stronger push"
     return "⚡ Time to lock in"
 
+
 def get_priority_badge(priority):
     if priority in ["Very High", "High"]:
         return '<span class="tag-high">Urgent</span>'
     elif priority == "Medium":
         return '<span class="tag-medium">Moderate</span>'
     return '<span class="tag-low">Manageable</span>'
+
 
 def get_subject_icon(subject_name):
     name = subject_name.lower()
@@ -308,6 +362,7 @@ def get_subject_icon(subject_name):
     if "network" in name or "security" in name:
         return "🌐"
     return "📘"
+
 
 def process_subject(subject_name, days_left, topics):
     if days_left <= 0:
@@ -364,6 +419,7 @@ def process_subject(subject_name, days_left, topics):
         "readiness_status": get_readiness_status(readiness_score)
     }
 
+
 def process_all_subjects(subjects_data):
     all_subject_results = []
     for subject in subjects_data:
@@ -371,8 +427,10 @@ def process_all_subjects(subjects_data):
         if "error" in result:
             return {"error": result["error"]}
         all_subject_results.append(result)
+
     all_subject_results.sort(key=lambda x: x["subject_priority_score"], reverse=True)
     return {"all_subject_results": all_subject_results}
+
 
 def flatten_topics(all_subject_results):
     rows = []
@@ -390,12 +448,18 @@ def flatten_topics(all_subject_results):
             })
     return pd.DataFrame(rows)
 
-def generate_study_timetable(topic_df):
+
+def generate_study_timetable(topic_df, start_date=None):
     if topic_df.empty:
         return pd.DataFrame()
 
+    if start_date is None:
+        start_date = date.today()
+
     timetable_rows = []
     day_counter = 1
+    session_counter = 1
+
     sorted_df = topic_df.sort_values(
         by=["Days Left", "Weakness Level", "Recommended Minutes"],
         ascending=[True, False, False]
@@ -403,18 +467,28 @@ def generate_study_timetable(topic_df):
 
     for _, row in sorted_df.iterrows():
         minutes_left = int(row["Recommended Minutes"])
+
         while minutes_left > 0:
             session_minutes = min(60, minutes_left)
+            session_date = start_date + timedelta(days=day_counter - 1)
+
             timetable_rows.append({
+                "Session ID": f"S{session_counter:03d}",
                 "Day": f"Day {day_counter}",
+                "Calendar Date": session_date.strftime("%Y-%m-%d"),
                 "Subject": row["Subject"],
                 "Topic": row["Topic"],
                 "Study Duration": format_minutes(session_minutes),
+                "Duration Minutes": session_minutes,
                 "Study Method": row["Study Method"]
             })
+
             minutes_left -= session_minutes
             day_counter += 1
+            session_counter += 1
+
     return pd.DataFrame(timetable_rows)
+
 
 def get_focus_distribution(topic_df):
     if topic_df.empty:
@@ -431,11 +505,13 @@ def get_focus_distribution(topic_df):
     df["Category"] = df["Weakness Level"].apply(classify)
     return df["Category"].value_counts().rename_axis("Category").reset_index(name="Count")
 
+
 def get_workload_by_subject(topic_df):
     if topic_df.empty:
         return pd.DataFrame(columns=["Subject", "Recommended Minutes"])
     out = topic_df.groupby("Subject", as_index=False)["Recommended Minutes"].sum()
     return out.sort_values("Recommended Minutes", ascending=False)
+
 
 def get_today_focus(topic_df):
     if topic_df.empty:
@@ -450,9 +526,9 @@ def get_today_focus(topic_df):
         "reason": "High weakness and closer exam date."
     }
 
+
 def save_history_entry(username, summary_values):
-    if username not in st.session_state.planner_history:
-        st.session_state.planner_history[username] = []
+    ensure_user_data(username)
 
     st.session_state.planner_history[username].append({
         "date": datetime.now().strftime("%d %b %Y, %I:%M %p"),
@@ -463,7 +539,8 @@ def save_history_entry(username, summary_values):
         "readiness": f"{summary_values['overall_readiness']}%"
     })
 
-def create_download_text(all_subject_results, summary_values, timetable_df):
+
+def create_download_text(all_subject_results, summary_values, timetable_df, progress_summary=None):
     output = StringIO()
     output.write("SMART REVISION PLAN\n")
     output.write("=" * 50 + "\n\n")
@@ -473,6 +550,15 @@ def create_download_text(all_subject_results, summary_values, timetable_df):
     output.write(f"Total Topics: {summary_values['total_topics']}\n")
     output.write(f"Total Recommended Study Time: {summary_values['total_study_time']}\n")
     output.write(f"Overall Readiness Score: {summary_values['overall_readiness']}%\n\n")
+
+    if progress_summary:
+        output.write("PROGRESS SUMMARY\n")
+        output.write("=" * 50 + "\n")
+        output.write(f"Completed Sessions: {progress_summary['completed_sessions']}/{progress_summary['total_sessions']}\n")
+        output.write(f"Progress: {progress_summary['completion_percent']}%\n")
+        output.write(f"Completed Time: {progress_summary['completed_minutes_text']}\n")
+        output.write(f"Current Streak: {progress_summary['current_streak']} day(s)\n")
+        output.write(f"Best Streak: {progress_summary['best_streak']} day(s)\n\n")
 
     output.write("SUBJECT RANKINGS\n")
     output.write("=" * 50 + "\n")
@@ -495,10 +581,11 @@ def create_download_text(all_subject_results, summary_values, timetable_df):
     if not timetable_df.empty:
         for _, row in timetable_df.iterrows():
             output.write(
-                f"{row['Day']}: {row['Subject']} - {row['Topic']} - "
+                f"{row['Day']} ({row['Calendar Date']}): {row['Subject']} - {row['Topic']} - "
                 f"{row['Study Duration']} - {row['Study Method']}\n"
             )
     return output.getvalue()
+
 
 def load_sample_data():
     return [
@@ -506,6 +593,113 @@ def load_sample_data():
         {"subject_name": "Database", "days_left": 14, "topics": [("SQL", 4), ("ERD", 3)]},
         {"subject_name": "Artificial Intelligence", "days_left": 3, "topics": [("Neural Networks", 5), ("Search Algorithm", 4)]}
     ]
+
+
+def get_completion_store(username):
+    ensure_user_data(username)
+    return st.session_state.user_progress[username]["completed_sessions"]
+
+
+def get_session_completed(username, session_id):
+    store = get_completion_store(username)
+    return session_id in store
+
+
+def set_session_completed(username, session_id, is_completed):
+    store = get_completion_store(username)
+    if is_completed:
+        store[session_id] = date.today().isoformat()
+    else:
+        if session_id in store:
+            del store[session_id]
+
+
+def get_progress_summary(username, timetable_df):
+    ensure_user_data(username)
+
+    if timetable_df is None or timetable_df.empty:
+        return {
+            "completed_sessions": 0,
+            "total_sessions": 0,
+            "completion_percent": 0,
+            "completed_minutes": 0,
+            "total_minutes": 0,
+            "completed_minutes_text": format_minutes(0),
+            "remaining_minutes_text": format_minutes(0),
+            "current_streak": 0,
+            "best_streak": 0,
+            "completed_today": 0
+        }
+
+    store = get_completion_store(username)
+    valid_session_ids = set(timetable_df["Session ID"].tolist())
+    completed_ids = [sid for sid in store.keys() if sid in valid_session_ids]
+
+    total_sessions = len(timetable_df)
+    completed_sessions = len(completed_ids)
+    completion_percent = int((completed_sessions / total_sessions) * 100) if total_sessions > 0 else 0
+
+    completed_df = timetable_df[timetable_df["Session ID"].isin(completed_ids)]
+    completed_minutes = int(completed_df["Duration Minutes"].sum()) if not completed_df.empty else 0
+    total_minutes = int(timetable_df["Duration Minutes"].sum()) if not timetable_df.empty else 0
+    remaining_minutes = max(total_minutes - completed_minutes, 0)
+
+    completion_dates = sorted(set(store[sid] for sid in completed_ids if sid in store))
+    current_streak, best_streak = calculate_streaks(completion_dates)
+
+    today_str = date.today().isoformat()
+    completed_today = sum(1 for sid in completed_ids if store.get(sid) == today_str)
+
+    return {
+        "completed_sessions": completed_sessions,
+        "total_sessions": total_sessions,
+        "completion_percent": completion_percent,
+        "completed_minutes": completed_minutes,
+        "total_minutes": total_minutes,
+        "completed_minutes_text": format_minutes(completed_minutes),
+        "remaining_minutes_text": format_minutes(remaining_minutes),
+        "current_streak": current_streak,
+        "best_streak": best_streak,
+        "completed_today": completed_today
+    }
+
+
+def calculate_streaks(date_strings):
+    if not date_strings:
+        return 0, 0
+
+    unique_dates = sorted(date.fromisoformat(d) for d in set(date_strings))
+
+    best_streak = 1
+    current_run = 1
+
+    for i in range(1, len(unique_dates)):
+        if unique_dates[i] == unique_dates[i - 1] + timedelta(days=1):
+            current_run += 1
+        else:
+            best_streak = max(best_streak, current_run)
+            current_run = 1
+
+    best_streak = max(best_streak, current_run)
+
+    today_value = date.today()
+    if unique_dates[-1] == today_value:
+        current_streak = 1
+        idx = len(unique_dates) - 1
+        while idx > 0 and unique_dates[idx - 1] == unique_dates[idx] - timedelta(days=1):
+            current_streak += 1
+            idx -= 1
+    else:
+        current_streak = 0
+
+    return current_streak, best_streak
+
+
+def get_completion_badge(done):
+    if done:
+        return '<span class="done-chip">Completed</span>'
+    return '<span class="pending-chip">Pending</span>'
+
 
 # ---------------------------------
 # PDF generation
@@ -524,7 +718,8 @@ def draw_pdf_background(canvas, doc):
     canvas.drawRightString(width - 18 * mm, 8 * mm, f"Page {doc.page}")
     canvas.restoreState()
 
-def build_revision_pdf(all_subject_results, summary_values, timetable_df):
+
+def build_revision_pdf(all_subject_results, summary_values, timetable_df, progress_summary=None):
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -536,27 +731,57 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
     )
 
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("TitleStyle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=24, leading=30, alignment=TA_CENTER, textColor=colors.whitesmoke, spaceAfter=10)
-    subtitle_style = ParagraphStyle("SubtitleStyle", parent=styles["Normal"], fontName="Helvetica", fontSize=10.5, leading=15, alignment=TA_CENTER, textColor=colors.HexColor("#E3D9F7"), spaceAfter=18)
-    heading_style = ParagraphStyle("HeadingStyle", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=14, leading=18, textColor=colors.HexColor("#F0E4FF"), spaceBefore=10, spaceAfter=8)
-    body_style = ParagraphStyle("BodyStyle", parent=styles["BodyText"], fontName="Helvetica", fontSize=10, leading=14, textColor=colors.whitesmoke, alignment=TA_LEFT)
-    small_style = ParagraphStyle("SmallStyle", parent=styles["BodyText"], fontName="Helvetica", fontSize=9, leading=12, textColor=colors.HexColor("#EAEAF2"), alignment=TA_LEFT)
+    title_style = ParagraphStyle(
+        "TitleStyle", parent=styles["Title"], fontName="Helvetica-Bold",
+        fontSize=24, leading=30, alignment=TA_CENTER,
+        textColor=colors.whitesmoke, spaceAfter=10
+    )
+    subtitle_style = ParagraphStyle(
+        "SubtitleStyle", parent=styles["Normal"], fontName="Helvetica",
+        fontSize=10.5, leading=15, alignment=TA_CENTER,
+        textColor=colors.HexColor("#E3D9F7"), spaceAfter=18
+    )
+    heading_style = ParagraphStyle(
+        "HeadingStyle", parent=styles["Heading2"], fontName="Helvetica-Bold",
+        fontSize=14, leading=18, textColor=colors.HexColor("#F0E4FF"),
+        spaceBefore=10, spaceAfter=8
+    )
+    body_style = ParagraphStyle(
+        "BodyStyle", parent=styles["BodyText"], fontName="Helvetica",
+        fontSize=10, leading=14, textColor=colors.whitesmoke, alignment=TA_LEFT
+    )
+    small_style = ParagraphStyle(
+        "SmallStyle", parent=styles["BodyText"], fontName="Helvetica",
+        fontSize=9, leading=12, textColor=colors.HexColor("#EAEAF2"), alignment=TA_LEFT
+    )
 
     story = []
     story.append(Spacer(1, 28))
     story.append(Paragraph("Smart Revision Planner", title_style))
-    story.append(Paragraph("A personalized revision report with ranked subjects, study priorities, and a day-by-day timetable.", subtitle_style))
+    story.append(Paragraph(
+        "A personalized revision report with ranked subjects, study priorities, progress tracking, and a day-by-day timetable.",
+        subtitle_style
+    ))
     story.append(Spacer(1, 18))
 
-    cover_table = Table([
+    cover_data = [
         ["Generated Date", datetime.now().strftime("%d %B %Y")],
         ["Top Subject", summary_values["most_prioritized_subject"]],
         ["Weakest Topic", summary_values["weakest_topic"]],
         ["Total Topics", str(summary_values["total_topics"])],
         ["Total Study Time", summary_values["total_study_time"]],
         ["Overall Readiness", f"{summary_values['overall_readiness']}%"],
-    ], colWidths=[55 * mm, 105 * mm])
+    ]
 
+    if progress_summary:
+        cover_data.extend([
+            ["Completed Sessions", f"{progress_summary['completed_sessions']}/{progress_summary['total_sessions']}"],
+            ["Progress", f"{progress_summary['completion_percent']}%"],
+            ["Current Streak", f"{progress_summary['current_streak']} day(s)"],
+            ["Best Streak", f"{progress_summary['best_streak']} day(s)"],
+        ])
+
+    cover_table = Table(cover_data, colWidths=[55 * mm, 105 * mm])
     cover_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#131A2E")),
         ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#8E44AD")),
@@ -615,11 +840,22 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
     if timetable_df.empty:
         story.append(Paragraph("No timetable generated.", body_style))
     else:
-        timetable_rows = [["Day", "Subject", "Topic", "Duration", "Method"]]
+        timetable_rows = [["ID", "Day", "Date", "Subject", "Topic", "Duration"]]
         for _, row in timetable_df.iterrows():
-            timetable_rows.append([row["Day"], row["Subject"], row["Topic"], row["Study Duration"], row["Study Method"]])
+            timetable_rows.append([
+                row["Session ID"],
+                row["Day"],
+                row["Calendar Date"],
+                row["Subject"],
+                row["Topic"],
+                row["Study Duration"]
+            ])
 
-        timetable_table = Table(timetable_rows, colWidths=[20 * mm, 35 * mm, 40 * mm, 30 * mm, 55 * mm], repeatRows=1)
+        timetable_table = Table(
+            timetable_rows,
+            colWidths=[18 * mm, 18 * mm, 28 * mm, 32 * mm, 42 * mm, 25 * mm],
+            repeatRows=1
+        )
         timetable_table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#6C3BB8")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
@@ -627,7 +863,7 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
             ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#131A2E")),
             ("TEXTCOLOR", (0, 1), (-1, -1), colors.whitesmoke),
             ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#40395E")),
-            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.2),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("TOPPADDING", (0, 0), (-1, -1), 6),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
@@ -637,9 +873,11 @@ def build_revision_pdf(all_subject_results, summary_values, timetable_df):
     story.append(Spacer(1, 16))
     story.append(Paragraph("Stay consistent. Small progress still counts.", small_style))
     doc.build(story, onFirstPage=draw_pdf_background, onLaterPages=draw_pdf_background)
+
     pdf = buffer.getvalue()
     buffer.close()
     return pdf
+
 
 # ---------------------------------
 # Auth UI
@@ -676,6 +914,7 @@ def login_view():
                     st.session_state.username = username
                     st.session_state.full_name = st.session_state.users[username]["full_name"]
                     st.session_state.current_page = "Home"
+                    ensure_user_data(username)
                     st.rerun()
                 else:
                     st.error("Invalid username or password.")
@@ -702,14 +941,17 @@ def login_view():
                         "password": password,
                         "full_name": full_name
                     }
-                    st.session_state.planner_history[username] = []
+                    ensure_user_data(username)
                     st.success("Account created successfully. Please switch to login and sign in.")
+
 
 # ---------------------------------
 # Sidebar navigation
 # ---------------------------------
 def sidebar_panel():
     with st.sidebar:
+        ensure_user_data(st.session_state.username)
+
         st.markdown("## 🌙 Planner Panel")
         st.write(f"Logged in as **{st.session_state.username}**")
         st.caption(f"Name: {st.session_state.full_name}")
@@ -736,10 +978,13 @@ def sidebar_panel():
         st.caption("Short sessions are still productive.")
         st.caption("Consistency beats panic revision.")
 
+
 # ---------------------------------
 # Pages
 # ---------------------------------
 def home_page():
+    ensure_user_data(st.session_state.username)
+
     st.markdown(f"""
     <div class="hero-box">
         <div class="main-title">📚 Smart Revision Planner</div>
@@ -749,29 +994,49 @@ def home_page():
     </div>
     """, unsafe_allow_html=True)
 
+    progress_summary = None
+    if st.session_state.last_plan_data:
+        progress_summary = get_progress_summary(
+            st.session_state.username,
+            st.session_state.last_plan_data["timetable_df"]
+        )
+
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("""
         <div class="mini-card">
             <h4>🌷 What you can do here</h4>
-            <p>Create smart study plans, detect your weakest topics, build a timetable, and export your results.</p>
+            <p>Create smart study plans, detect your weakest topics, build a timetable, track progress, and export your results.</p>
         </div>
         """, unsafe_allow_html=True)
 
     with c2:
         history_count = len(st.session_state.planner_history.get(st.session_state.username, []))
+        streak_text = f"{progress_summary['current_streak']} day(s)" if progress_summary else "0 day(s)"
         st.markdown(f"""
         <div class="mini-card">
             <h4>📌 Your activity</h4>
-            <p>You have <b>{history_count}</b> saved planner entr{'y' if history_count == 1 else 'ies'} in your history.</p>
+            <p>You have <b>{history_count}</b> saved planner entr{'y' if history_count == 1 else 'ies'}.</p>
+            <p>Your current streak is <b>{streak_text}</b>.</p>
         </div>
         """, unsafe_allow_html=True)
+
+    if progress_summary:
+        st.markdown("<hr>", unsafe_allow_html=True)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Completed Sessions", f"{progress_summary['completed_sessions']}/{progress_summary['total_sessions']}")
+        m2.metric("Progress", f"{progress_summary['completion_percent']}%")
+        m3.metric("Completed Time", progress_summary["completed_minutes_text"])
+        m4.metric("Streak", f"{progress_summary['current_streak']} day(s)")
 
     if st.button("Go to Planner", type="primary"):
         st.session_state.current_page = "Planner"
         st.rerun()
 
+
 def profile_page():
+    ensure_user_data(st.session_state.username)
+
     st.subheader("👤 Profile")
     st.markdown(f"""
     <div class="profile-box">
@@ -782,16 +1047,46 @@ def profile_page():
     </div>
     """, unsafe_allow_html=True)
 
+    if st.session_state.last_plan_data:
+        progress_summary = get_progress_summary(
+            st.session_state.username,
+            st.session_state.last_plan_data["timetable_df"]
+        )
+
+        st.markdown("""
+        <div class="profile-box">
+            <h4>Study Progress Summary</h4>
+        </div>
+        """, unsafe_allow_html=True)
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Current Streak", f"{progress_summary['current_streak']} day(s)")
+        c2.metric("Best Streak", f"{progress_summary['best_streak']} day(s)")
+        c3.metric("Completed Today", progress_summary["completed_today"])
+
+
 def history_page():
+    ensure_user_data(st.session_state.username)
+
     st.subheader("🕰 Planner History")
     history = st.session_state.planner_history.get(st.session_state.username, [])
     if history:
         history_df = pd.DataFrame(history)
         st.dataframe(history_df, use_container_width=True, hide_index=True)
+
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            if st.button("Clear History"):
+                st.session_state.planner_history[st.session_state.username] = []
+                st.success("Planner history cleared.")
+                st.rerun()
     else:
         st.info("No planner history saved yet. Generate a plan first.")
 
+
 def planner_page():
+    ensure_user_data(st.session_state.username)
+
     st.subheader("🧠 Build Your Revision Plan")
 
     top_col1, top_col2, top_col3 = st.columns([1, 1, 1])
@@ -807,23 +1102,40 @@ def planner_page():
         subjects_data = load_sample_data()
         st.info("Sample data loaded. Click the button below to generate the planner.")
     else:
-        num_subjects = st.number_input("How many subjects do you want to enter?", min_value=1, max_value=10, value=2, step=1)
+        num_subjects = st.number_input(
+            "How many subjects do you want to enter?",
+            min_value=1, max_value=10, value=2, step=1
+        )
         subjects_data = []
 
         for s in range(num_subjects):
             st.markdown(f"<div class='section-card'><h3>Subject {s+1}</h3></div>", unsafe_allow_html=True)
 
-            subject_name = st.text_input(f"Enter subject name for Subject {s+1}", key=f"subject_name_{s}").strip()
+            subject_name = st.text_input(
+                f"Enter subject name for Subject {s+1}",
+                key=f"subject_name_{s}"
+            ).strip()
 
             col1, col2 = st.columns(2)
             with col1:
-                time_value = st.number_input(f"Enter time left before exam for Subject {s+1}", min_value=1, value=7, step=1, key=f"time_value_{s}")
+                time_value = st.number_input(
+                    f"Enter time left before exam for Subject {s+1}",
+                    min_value=1, value=7, step=1, key=f"time_value_{s}"
+                )
             with col2:
-                time_unit = st.selectbox(f"Select time unit for Subject {s+1}", ["Day(s)", "Week(s)", "Month(s)"], key=f"time_unit_{s}")
+                time_unit = st.selectbox(
+                    f"Select time unit for Subject {s+1}",
+                    ["Day(s)", "Week(s)", "Month(s)"],
+                    key=f"time_unit_{s}"
+                )
 
             days_left = convert_to_days(time_value, time_unit)
 
-            num_topics = st.number_input(f"How many topics for Subject {s+1}?", min_value=1, max_value=10, value=2, step=1, key=f"num_topics_{s}")
+            num_topics = st.number_input(
+                f"How many topics for Subject {s+1}?",
+                min_value=1, max_value=10, value=2, step=1, key=f"num_topics_{s}"
+            )
+
             topics = []
             seen_topics = set()
 
@@ -831,9 +1143,15 @@ def planner_page():
                 st.markdown(f"**Topic {t+1}**")
                 topic_col1, topic_col2 = st.columns(2)
                 with topic_col1:
-                    topic_name = st.text_input(f"Enter topic {t+1} name", key=f"topic_name_{s}_{t}").strip()
+                    topic_name = st.text_input(
+                        f"Enter topic {t+1} name",
+                        key=f"topic_name_{s}_{t}"
+                    ).strip()
                 with topic_col2:
-                    weakness_level = st.slider(f"Weakness level for Topic {t+1}", min_value=1, max_value=5, value=3, key=f"weakness_{s}_{t}")
+                    weakness_level = st.slider(
+                        f"Weakness level for Topic {t+1}",
+                        min_value=1, max_value=5, value=3, key=f"weakness_{s}_{t}"
+                    )
 
                 if topic_name:
                     topic_key = topic_name.lower()
@@ -862,13 +1180,16 @@ def planner_page():
 
         all_subject_results = result["all_subject_results"]
         topic_df = flatten_topics(all_subject_results)
-        timetable_df = generate_study_timetable(topic_df)
+        timetable_df = generate_study_timetable(topic_df, start_date=date.today())
         today_focus = get_today_focus(topic_df)
 
         total_topics = len(topic_df)
         total_minutes = int(topic_df["Recommended Minutes"].sum()) if not topic_df.empty else 0
         most_prioritized_subject = all_subject_results[0]["subject_name"]
-        weakest_topic_row = topic_df.sort_values(by=["Weakness Level", "Recommended Minutes"], ascending=[False, False]).iloc[0]
+        weakest_topic_row = topic_df.sort_values(
+            by=["Weakness Level", "Recommended Minutes"],
+            ascending=[False, False]
+        ).iloc[0]
         weakest_topic = f"{weakest_topic_row['Topic']} ({weakest_topic_row['Subject']})"
         overall_readiness = int(sum(s["readiness_score"] for s in all_subject_results) / len(all_subject_results))
 
@@ -881,105 +1202,235 @@ def planner_page():
         }
 
         save_history_entry(st.session_state.username, summary_values)
+        st.session_state.user_progress[st.session_state.username]["plans_generated"] += 1
 
         st.session_state.last_plan_data = {
             "all_subject_results": all_subject_results,
             "topic_df": topic_df,
             "timetable_df": timetable_df,
             "summary_values": summary_values,
-            "today_focus": today_focus
+            "today_focus": today_focus,
+            "generated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
         if overall_readiness >= 80 and show_fun_mode:
             st.balloons()
 
         st.success("Your smart revision plan has been generated and saved.")
+        st.rerun()
 
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Top Subject", shorten_text(most_prioritized_subject))
-        c2.metric("Weakest Topic", shorten_text(weakest_topic))
-        c3.metric("Total Topics", total_topics)
-        c4.metric("Study Time", format_minutes(total_minutes))
-        c5.metric("Readiness", f"{overall_readiness}%")
+    plan = st.session_state.last_plan_data
+    if not plan:
+        return
+
+    all_subject_results = plan["all_subject_results"]
+    topic_df = plan["topic_df"]
+    timetable_df = plan["timetable_df"]
+    summary_values = plan["summary_values"]
+    today_focus = plan["today_focus"]
+
+    total_topics = summary_values["total_topics"]
+    total_minutes = int(topic_df["Recommended Minutes"].sum()) if not topic_df.empty else 0
+    overall_readiness = summary_values["overall_readiness"]
+    progress_summary = get_progress_summary(st.session_state.username, timetable_df)
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Top Subject", shorten_text(summary_values["most_prioritized_subject"]))
+    c2.metric("Weakest Topic", shorten_text(summary_values["weakest_topic"]))
+    c3.metric("Total Topics", total_topics)
+    c4.metric("Study Time", format_minutes(total_minutes))
+    c5.metric("Readiness", f"{overall_readiness}%")
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Completed Sessions", f"{progress_summary['completed_sessions']}/{progress_summary['total_sessions']}")
+    p2.metric("Progress", f"{progress_summary['completion_percent']}%")
+    p3.metric("Completed Time", progress_summary["completed_minutes_text"])
+    p4.metric("Current Streak", f"{progress_summary['current_streak']} day(s)")
+
+    st.progress(progress_summary["completion_percent"] / 100)
+
+    mini1, mini2 = st.columns(2)
+    with mini1:
+        mood_text = get_study_mood(overall_readiness)
+        st.markdown(
+            f"<div class='mini-card'><h4>🌷 Planner Status</h4><p>{mood_text}</p><p>Your current readiness is <b>{overall_readiness}%</b>.</p></div>",
+            unsafe_allow_html=True
+        )
+    with mini2:
+        if today_focus:
+            st.markdown(
+                f"<div class='mini-card'><h4>🎯 Today's Focus</h4><p><b>{today_focus['topic']}</b> — {today_focus['subject']}</p><p>Reason: {today_focus['reason']}</p></div>",
+                unsafe_allow_html=True
+            )
+
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🌟 Dashboard",
+        "✅ Daily Checklist",
+        "📌 Subjects",
+        "🗓 Timetable"
+    ])
+
+    with tab1:
+        dash_col1, dash_col2 = st.columns(2)
+        with dash_col1:
+            st.markdown("<div class='section-card'><b>Subject Priority Score</b></div>", unsafe_allow_html=True)
+            subject_chart_df = pd.DataFrame([
+                {"Subject": f"{s['subject_icon']} {s['subject_name']}", "Priority Score": s["subject_priority_score"]}
+                for s in all_subject_results
+            ])
+            st.bar_chart(subject_chart_df.set_index("Subject"))
+
+        with dash_col2:
+            st.markdown("<div class='section-card'><b>Topic Weakness Level</b></div>", unsafe_allow_html=True)
+            weakness_chart_df = topic_df[["Topic", "Weakness Level"]].copy()
+            st.bar_chart(weakness_chart_df.set_index("Topic"))
 
         st.markdown("<hr>", unsafe_allow_html=True)
 
-        mini1, mini2 = st.columns(2)
-        with mini1:
-            mood_text = get_study_mood(overall_readiness)
-            st.markdown(
-                f"<div class='mini-card'><h4>🌷 Planner Status</h4><p>{mood_text}</p><p>Your current readiness is <b>{overall_readiness}%</b>.</p></div>",
-                unsafe_allow_html=True
-            )
-        with mini2:
-            if today_focus:
+        low1, low2 = st.columns(2)
+        with low1:
+            st.markdown("<div class='section-card'><b>Workload by Subject</b></div>", unsafe_allow_html=True)
+            workload_df = get_workload_by_subject(topic_df)
+            st.bar_chart(workload_df.set_index("Subject"))
+
+        with low2:
+            st.markdown("<div class='section-card'><b>Focus Distribution</b></div>", unsafe_allow_html=True)
+            focus_df = get_focus_distribution(topic_df)
+            st.bar_chart(focus_df.set_index("Category"))
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        extra1, extra2, extra3 = st.columns(3)
+        extra1.markdown(
+            f"<div class='progress-card'><h4>🔥 Current Streak</h4><p><b>{progress_summary['current_streak']}</b> day(s)</p></div>",
+            unsafe_allow_html=True
+        )
+        extra2.markdown(
+            f"<div class='progress-card'><h4>🏆 Best Streak</h4><p><b>{progress_summary['best_streak']}</b> day(s)</p></div>",
+            unsafe_allow_html=True
+        )
+        extra3.markdown(
+            f"<div class='progress-card'><h4>📍 Completed Today</h4><p><b>{progress_summary['completed_today']}</b> session(s)</p></div>",
+            unsafe_allow_html=True
+        )
+
+    with tab2:
+        st.markdown("### ✅ Daily Study Checklist")
+
+        available_dates = sorted(timetable_df["Calendar Date"].unique().tolist())
+        today_str = date.today().strftime("%Y-%m-%d")
+        default_index = available_dates.index(today_str) if today_str in available_dates else 0
+
+        selected_date = st.selectbox(
+            "Choose checklist date",
+            options=available_dates,
+            index=default_index
+        )
+
+        daily_df = timetable_df[timetable_df["Calendar Date"] == selected_date].copy()
+
+        if daily_df.empty:
+            st.info("No sessions scheduled for this date.")
+        else:
+            completed_count = 0
+
+            for _, row in daily_df.iterrows():
+                session_id = row["Session ID"]
+                is_done = get_session_completed(st.session_state.username, session_id)
+
+                st.markdown("<div class='checklist-card'>", unsafe_allow_html=True)
                 st.markdown(
-                    f"<div class='mini-card'><h4>🎯 Today's Focus</h4><p><b>{today_focus['topic']}</b> — {today_focus['subject']}</p><p>Reason: {today_focus['reason']}</p></div>",
+                    f"**{row['Session ID']} • {row['Subject']}**  \n"
+                    f"Topic: **{row['Topic']}**  \n"
+                    f"Duration: **{row['Study Duration']}**  \n"
+                    f"Method: **{row['Study Method']}**  \n"
+                    f"{get_completion_badge(is_done)}",
                     unsafe_allow_html=True
                 )
 
-        tab1, tab2, tab3 = st.tabs(["🌟 Dashboard", "📌 Subjects", "🗓 Timetable"])
-
-        with tab1:
-            dash_col1, dash_col2 = st.columns(2)
-            with dash_col1:
-                st.markdown("<div class='section-card'><b>Subject Priority Score</b></div>", unsafe_allow_html=True)
-                subject_chart_df = pd.DataFrame([
-                    {"Subject": f"{s['subject_icon']} {s['subject_name']}", "Priority Score": s["subject_priority_score"]}
-                    for s in all_subject_results
-                ])
-                st.bar_chart(subject_chart_df.set_index("Subject"))
-
-            with dash_col2:
-                st.markdown("<div class='section-card'><b>Topic Weakness Level</b></div>", unsafe_allow_html=True)
-                weakness_chart_df = topic_df[["Topic", "Weakness Level"]].copy()
-                st.bar_chart(weakness_chart_df.set_index("Topic"))
-
-            st.markdown("<hr>", unsafe_allow_html=True)
-            low1, low2 = st.columns(2)
-            with low1:
-                st.markdown("<div class='section-card'><b>Workload by Subject</b></div>", unsafe_allow_html=True)
-                workload_df = get_workload_by_subject(topic_df)
-                st.bar_chart(workload_df.set_index("Subject"))
-            with low2:
-                st.markdown("<div class='section-card'><b>Focus Distribution</b></div>", unsafe_allow_html=True)
-                focus_df = get_focus_distribution(topic_df)
-                st.bar_chart(focus_df.set_index("Category"))
-
-        with tab2:
-            for i, subject in enumerate(all_subject_results, start=1):
-                st.markdown("<div class='subject-card'>", unsafe_allow_html=True)
-                st.markdown(
-                    f"## {subject['subject_icon']} Subject Rank {i}: {subject['subject_name']} " + get_priority_badge(subject["exam_priority"]),
-                    unsafe_allow_html=True
+                checked = st.checkbox(
+                    f"Mark {session_id} as completed",
+                    value=is_done,
+                    key=f"check_{session_id}"
                 )
 
-                info1, info2, info3, info4, info5 = st.columns(5)
-                info1.markdown(f"<div class='small-label'>Days Left</div><div class='big-value'>{subject['days_left']} day(s)</div>", unsafe_allow_html=True)
-                info2.markdown(f"<div class='small-label'>Exam Priority</div><div class='big-value'>{subject['exam_priority']}</div>", unsafe_allow_html=True)
-                info3.markdown(f"<div class='small-label'>Top Topic</div><div class='big-value'>{subject['most_prioritized_topic']}</div>", unsafe_allow_html=True)
-                info4.markdown(f"<div class='small-label'>Readiness</div><div class='big-value'>{subject['readiness_score']}%</div>", unsafe_allow_html=True)
-                info5.markdown(f"<div class='small-label'>Status</div><div class='big-value'>{subject['readiness_status']}</div>", unsafe_allow_html=True)
+                if checked != is_done:
+                    set_session_completed(st.session_state.username, session_id, checked)
+                    st.rerun()
 
-                st.markdown("### Topic Suggestions")
-                for j, topic in enumerate(subject["topic_suggestions"], start=1):
-                    with st.expander(f"Topic {j}: {topic['topic']}"):
-                        st.write(f"**Weakness Level:** {topic['weakness_level']}")
-                        st.progress(topic["weakness_level"] / 5)
-                        st.write(f"**Recommended Study Duration:** {format_minutes(topic['recommended_minutes'])}")
-                        st.write(f"**Study Method:** {topic['study_method']}")
-                        st.write(f"**Reminder:** {topic['reminder']}")
-                        st.write(f"**Suggestion:** {topic['suggestion']}")
-                        st.write(f"**Best Tip:** {topic['best_tip']}")
+                if checked:
+                    completed_count += 1
+
                 st.markdown("</div>", unsafe_allow_html=True)
 
-        with tab3:
-            if timetable_df.empty:
-                st.info("No timetable generated.")
-            else:
-                st.dataframe(timetable_df, use_container_width=True, hide_index=True)
+            st.markdown("<hr>", unsafe_allow_html=True)
+
+            percent = int((completed_count / len(daily_df)) * 100) if len(daily_df) > 0 else 0
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Sessions for Selected Date", len(daily_df))
+            c2.metric("Completed", completed_count)
+            c3.metric("Daily Completion", f"{percent}%")
+
+            st.progress(percent / 100)
+
+    with tab3:
+        for i, subject in enumerate(all_subject_results, start=1):
+            st.markdown("<div class='subject-card'>", unsafe_allow_html=True)
+            st.markdown(
+                f"## {subject['subject_icon']} Subject Rank {i}: {subject['subject_name']} " + get_priority_badge(subject["exam_priority"]),
+                unsafe_allow_html=True
+            )
+
+            info1, info2, info3, info4, info5 = st.columns(5)
+            info1.markdown(
+                f"<div class='small-label'>Days Left</div><div class='big-value'>{subject['days_left']} day(s)</div>",
+                unsafe_allow_html=True
+            )
+            info2.markdown(
+                f"<div class='small-label'>Exam Priority</div><div class='big-value'>{subject['exam_priority']}</div>",
+                unsafe_allow_html=True
+            )
+            info3.markdown(
+                f"<div class='small-label'>Top Topic</div><div class='big-value'>{subject['most_prioritized_topic']}</div>",
+                unsafe_allow_html=True
+            )
+            info4.markdown(
+                f"<div class='small-label'>Readiness</div><div class='big-value'>{subject['readiness_score']}%</div>",
+                unsafe_allow_html=True
+            )
+            info5.markdown(
+                f"<div class='small-label'>Status</div><div class='big-value'>{subject['readiness_status']}</div>",
+                unsafe_allow_html=True
+            )
+
+            st.markdown("### Topic Suggestions")
+            for j, topic in enumerate(subject["topic_suggestions"], start=1):
+                with st.expander(f"Topic {j}: {topic['topic']}"):
+                    st.write(f"**Weakness Level:** {topic['weakness_level']}")
+                    st.progress(topic["weakness_level"] / 5)
+                    st.write(f"**Recommended Study Duration:** {format_minutes(topic['recommended_minutes'])}")
+                    st.write(f"**Study Method:** {topic['study_method']}")
+                    st.write(f"**Reminder:** {topic['reminder']}")
+                    st.write(f"**Suggestion:** {topic['suggestion']}")
+                    st.write(f"**Best Tip:** {topic['best_tip']}")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    with tab4:
+        if timetable_df.empty:
+            st.info("No timetable generated.")
+        else:
+            display_df = timetable_df.copy()
+            display_df["Completed"] = display_df["Session ID"].apply(
+                lambda x: "Yes" if get_session_completed(st.session_state.username, x) else "No"
+            )
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
 
 def downloads_page():
+    ensure_user_data(st.session_state.username)
+
     st.subheader("📥 Downloads")
     plan = st.session_state.last_plan_data
 
@@ -990,6 +1441,7 @@ def downloads_page():
     summary_values = plan["summary_values"]
     timetable_df = plan["timetable_df"]
     all_subject_results = plan["all_subject_results"]
+    progress_summary = get_progress_summary(st.session_state.username, timetable_df)
 
     overall_readiness = summary_values["overall_readiness"]
     if overall_readiness >= 80:
@@ -1004,18 +1456,52 @@ def downloads_page():
         unsafe_allow_html=True
     )
 
-    pdf_bytes = build_revision_pdf(all_subject_results, summary_values, timetable_df)
-    txt_data = create_download_text(all_subject_results, summary_values, timetable_df)
-    csv_data = timetable_df.to_csv(index=False).encode("utf-8")
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Progress", f"{progress_summary['completion_percent']}%")
+    p2.metric("Completed Sessions", f"{progress_summary['completed_sessions']}/{progress_summary['total_sessions']}")
+    p3.metric("Current Streak", f"{progress_summary['current_streak']} day(s)")
 
-    st.markdown("<div class='download-card'><b>📄 PDF Version</b><br>Best for presentation or saving a polished report.</div>", unsafe_allow_html=True)
-    st.download_button("📄 Download Styled Revision Plan (.pdf)", data=pdf_bytes, file_name="smart_revision_plan.pdf", mime="application/pdf")
+    pdf_bytes = build_revision_pdf(all_subject_results, summary_values, timetable_df, progress_summary)
+    txt_data = create_download_text(all_subject_results, summary_values, timetable_df, progress_summary)
+    csv_data = timetable_df.assign(
+        Completed=timetable_df["Session ID"].apply(
+            lambda x: "Yes" if get_session_completed(st.session_state.username, x) else "No"
+        )
+    ).to_csv(index=False).encode("utf-8")
 
-    st.markdown("<div class='download-card'><b>📝 TXT Version</b><br>Best for simple quick notes.</div>", unsafe_allow_html=True)
-    st.download_button("📝 Download Revision Plan (.txt)", data=txt_data, file_name="smart_revision_plan.txt", mime="text/plain")
+    st.markdown(
+        "<div class='download-card'><b>📄 PDF Version</b><br>Best for presentation or saving a polished report.</div>",
+        unsafe_allow_html=True
+    )
+    st.download_button(
+        "📄 Download Styled Revision Plan (.pdf)",
+        data=pdf_bytes,
+        file_name="smart_revision_plan.pdf",
+        mime="application/pdf"
+    )
 
-    st.markdown("<div class='download-card'><b>📊 CSV Timetable</b><br>Best for editing schedule data.</div>", unsafe_allow_html=True)
-    st.download_button("📊 Download Timetable (.csv)", data=csv_data, file_name="study_timetable.csv", mime="text/csv")
+    st.markdown(
+        "<div class='download-card'><b>📝 TXT Version</b><br>Best for simple quick notes.</div>",
+        unsafe_allow_html=True
+    )
+    st.download_button(
+        "📝 Download Revision Plan (.txt)",
+        data=txt_data,
+        file_name="smart_revision_plan.txt",
+        mime="text/plain"
+    )
+
+    st.markdown(
+        "<div class='download-card'><b>📊 CSV Timetable</b><br>Best for editing schedule data.</div>",
+        unsafe_allow_html=True
+    )
+    st.download_button(
+        "📊 Download Timetable (.csv)",
+        data=csv_data,
+        file_name="study_timetable.csv",
+        mime="text/csv"
+    )
+
 
 # ---------------------------------
 # Run app
@@ -1023,6 +1509,7 @@ def downloads_page():
 if not st.session_state.logged_in:
     login_view()
 else:
+    ensure_user_data(st.session_state.username)
     sidebar_panel()
 
     if st.session_state.current_page == "Home":
