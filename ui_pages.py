@@ -1,1 +1,966 @@
+import streamlit as st
+from datetime import datetime, date
+import pandas as pd
 
+from planner_logic import (
+    convert_to_days,
+    format_minutes,
+    shorten_text,
+    get_study_mood,
+    get_priority_badge,
+    process_all_subjects,
+    flatten_topics,
+    generate_study_timetable,
+    get_focus_distribution,
+    get_workload_by_subject,
+    get_today_focus,
+    load_sample_data,
+)
+from progress_utils import (
+    ensure_user_data,
+    get_mode_tone_text,
+    get_mode_feedback_text,
+    get_motivation_message,
+    get_progress_summary,
+    get_session_completed,
+    set_session_completed,
+    get_completion_badge,
+    mark_all_for_date,
+    reset_all_progress,
+    get_overdue_sessions,
+    get_today_sessions,
+    enrich_timetable_status,
+    filter_timetable_df,
+    build_calendar_view,
+    get_daily_goal_progress,
+)
+from export_utils import (
+    build_plan_snapshot,
+    save_full_plan_entry,
+    load_plan_into_session,
+    export_plan_json,
+    import_plan_json,
+    build_revision_pdf,
+    create_download_text,
+)
+
+
+def init_user_state():
+    if "users" not in st.session_state:
+        st.session_state.users = {
+            "student": {"password": "revision123", "full_name": "Demo Student"},
+            "wawa": {"password": "1234", "full_name": "Wawa"},
+            "admin": {"password": "smartplanner", "full_name": "Admin User"}
+        }
+
+    if "planner_history" not in st.session_state:
+        st.session_state.planner_history = {}
+
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+
+    if "username" not in st.session_state:
+        st.session_state.username = ""
+
+    if "full_name" not in st.session_state:
+        st.session_state.full_name = ""
+
+    if "auth_mode" not in st.session_state:
+        st.session_state.auth_mode = "login"
+
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "Home"
+
+    if "last_plan_data" not in st.session_state:
+        st.session_state.last_plan_data = None
+
+    if "user_progress" not in st.session_state:
+        st.session_state.user_progress = {}
+
+    if "user_settings" not in st.session_state:
+        st.session_state.user_settings = {}
+
+
+def inject_global_styles():
+    st.markdown("""
+    <style>
+    .block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
+    .main-title { font-size: 3rem; font-weight: 800; margin-bottom: 0.2rem; line-height: 1.1; }
+    .subtitle { font-size: 1.02rem; color: #d6d1e6; margin-bottom: 1rem; }
+    .hero-box {
+        padding: 1.5rem 1.7rem; border-radius: 24px;
+        background: radial-gradient(circle at top left, rgba(255,255,255,0.10), transparent 28%),
+                    linear-gradient(135deg, rgba(142,68,173,0.30), rgba(20,20,35,0.96));
+        border: 1px solid rgba(255,255,255,0.08); margin-bottom: 1.2rem;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.18);
+    }
+    .section-card, .profile-box, .progress-card, .settings-box, .history-card, .download-card, .mini-card, .subject-card, .checklist-card, .badge-box {
+        padding: 1rem 1.2rem; border-radius: 18px; background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.06); margin-bottom: 1rem;
+    }
+    .mini-card { min-height: 120px; }
+    .small-label { font-size: 0.85rem; color: #bbb6cc; margin-bottom: 0.2rem; }
+    .big-value { font-size: 1.15rem; font-weight: 700; }
+    .feedback-box {
+        padding: 1rem 1.2rem; border-radius: 16px; background: rgba(142,68,173,0.12);
+        border: 1px solid rgba(142,68,173,0.28); margin-top: 0.5rem;
+    }
+    .tag-high, .tag-medium, .tag-low, .done-chip, .pending-chip {
+        display: inline-block; padding: 0.24rem 0.55rem; border-radius: 999px; font-size: 0.78rem; font-weight: 700;
+    }
+    .tag-high { background: rgba(255,99,132,0.15); border: 1px solid rgba(255,99,132,0.3); }
+    .tag-medium { background: rgba(255,206,86,0.12); border: 1px solid rgba(255,206,86,0.28); }
+    .tag-low { background: rgba(75,192,192,0.12); border: 1px solid rgba(75,192,192,0.28); }
+    .done-chip { background: rgba(75,192,192,0.14); border: 1px solid rgba(75,192,192,0.26); }
+    .pending-chip { background: rgba(255,206,86,0.12); border: 1px solid rgba(255,206,86,0.26); }
+    .login-wrap {
+        max-width: 520px; margin: 2.5rem auto; padding: 2rem; border-radius: 24px;
+        background: radial-gradient(circle at top left, rgba(255,255,255,0.08), transparent 30%),
+                    linear-gradient(135deg, rgba(142,68,173,0.25), rgba(20,20,35,0.96));
+        border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 10px 35px rgba(0,0,0,0.22);
+    }
+    .login-title { font-size: 2.2rem; font-weight: 800; text-align: center; margin-bottom: 0.3rem; }
+    .login-subtitle { text-align: center; color: #d4cbe8; margin-bottom: 1.4rem; }
+    hr { border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 1.2rem 0; }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+def login_view():
+    st.markdown("""
+    <div class="login-wrap">
+        <div class="login-title">🔐 Smart Planner Access</div>
+        <div class="login-subtitle">
+            Login or create an account to access your revision dashboard.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    mode_col1, mode_col2, mode_col3 = st.columns([1, 1, 1])
+    with mode_col2:
+        st.radio(
+            "Choose access mode",
+            ["login", "signup"],
+            key="auth_mode",
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        if st.session_state.auth_mode == "login":
+            username = st.text_input("Username", key="login_user")
+            password = st.text_input("Password", type="password", key="login_pass")
+
+            if st.button("Login", type="primary", use_container_width=True):
+                if username in st.session_state.users and st.session_state.users[username]["password"] == password:
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+                    st.session_state.full_name = st.session_state.users[username]["full_name"]
+                    st.session_state.current_page = "Home"
+                    ensure_user_data(st.session_state, username)
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+
+            with st.expander("Demo account"):
+                st.write("Username: `student`")
+                st.write("Password: `revision123`")
+
+        else:
+            full_name = st.text_input("Full Name", key="signup_name")
+            username = st.text_input("Choose Username", key="signup_user")
+            password = st.text_input("Choose Password", type="password", key="signup_pass")
+            confirm_password = st.text_input("Confirm Password", type="password", key="signup_confirm")
+
+            if st.button("Create Account", type="primary", use_container_width=True):
+                if not full_name or not username or not password or not confirm_password:
+                    st.error("Please fill in all fields.")
+                elif username in st.session_state.users:
+                    st.error("Username already exists.")
+                elif password != confirm_password:
+                    st.error("Passwords do not match.")
+                else:
+                    st.session_state.users[username] = {
+                        "password": password,
+                        "full_name": full_name
+                    }
+                    ensure_user_data(st.session_state, username)
+                    st.success("Account created successfully. Please switch to login and sign in.")
+
+
+def sidebar_panel():
+    ensure_user_data(st.session_state, st.session_state.username)
+
+    with st.sidebar:
+        st.markdown("## 🌙 Planner Panel")
+        st.write(f"Logged in as **{st.session_state.username}**")
+        st.caption(f"Name: {st.session_state.full_name}")
+        st.markdown("---")
+
+        page = st.radio(
+            "Navigation",
+            ["Home", "Planner", "History", "Profile", "Downloads"],
+            index=["Home", "Planner", "History", "Profile", "Downloads"].index(st.session_state.current_page)
+        )
+        st.session_state.current_page = page
+
+        st.markdown("---")
+        if st.button("Logout"):
+            st.session_state.logged_in = False
+            st.session_state.username = ""
+            st.session_state.full_name = ""
+            st.session_state.current_page = "Home"
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("### ✨ Cute focus tips")
+        st.caption("Start with the hardest topic first.")
+        st.caption("Short sessions are still productive.")
+        st.caption("Consistency beats panic revision.")
+
+
+def home_page():
+    ensure_user_data(st.session_state, st.session_state.username)
+
+    st.markdown(f"""
+    <div class="hero-box">
+        <div class="main-title">📚 Smart Revision Planner</div>
+        <div class="subtitle">
+            Welcome back, <b>{st.session_state.full_name}</b>. This is your smart revision space.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    progress_summary = None
+    settings = st.session_state.user_settings[st.session_state.username]
+
+    if st.session_state.last_plan_data:
+        progress_summary = get_progress_summary(
+            st.session_state,
+            st.session_state.username,
+            st.session_state.last_plan_data["timetable_df"],
+            format_minutes
+        )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("""
+        <div class="mini-card">
+            <h4>🌷 What you can do here</h4>
+            <p>Create smart study plans, save full plans, reopen old plans, import/export JSON, track progress, and export reports.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with c2:
+        history_count = len(st.session_state.planner_history.get(st.session_state.username, []))
+        streak_text = f"{progress_summary['current_streak']} day(s)" if progress_summary else "0 day(s)"
+        st.markdown(f"""
+        <div class="mini-card">
+            <h4>📌 Your activity</h4>
+            <p>You have <b>{history_count}</b> saved full plans.</p>
+            <p>Your current streak is <b>{streak_text}</b>.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    if progress_summary:
+        st.markdown("<hr>", unsafe_allow_html=True)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Completed Sessions", f"{progress_summary['completed_sessions']}/{progress_summary['total_sessions']}")
+        m2.metric("Progress", f"{progress_summary['completion_percent']}%")
+        m3.metric("Level", progress_summary["level"])
+        m4.metric("XP", progress_summary["xp"])
+
+        combined_message = get_motivation_message(
+            settings["motivational_mode"],
+            progress_summary["completion_percent"],
+            progress_summary["current_streak"]
+        )
+        combined_feedback = get_mode_feedback_text(
+            settings["motivational_mode"],
+            progress_summary["completion_percent"]
+        )
+
+        st.markdown(
+            f"<div class='feedback-box'><b>Motivation:</b><br>{combined_message}<br><br><b>Planner Tone:</b><br>{combined_feedback}</div>",
+            unsafe_allow_html=True
+        )
+
+        timetable_df = st.session_state.last_plan_data["timetable_df"]
+        overdue_df = get_overdue_sessions(st.session_state, st.session_state.username, timetable_df)
+        today_df = get_today_sessions(st.session_state, st.session_state.username, timetable_df)
+
+        daily_goal_minutes = settings["daily_study_goal_minutes"]
+        done_today_minutes, goal_percent = get_daily_goal_progress(
+            st.session_state, st.session_state.username, timetable_df, daily_goal_minutes
+        )
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+        d1, d2, d3 = st.columns(3)
+        d1.metric("Overdue Sessions", len(overdue_df))
+        d2.metric("Today's Sessions", len(today_df))
+        d3.metric("Daily Goal", f"{done_today_minutes}/{daily_goal_minutes} min")
+        st.progress(goal_percent / 100)
+
+    if st.button("Go to Planner", type="primary"):
+        st.session_state.current_page = "Planner"
+        st.rerun()
+
+
+def profile_page():
+    ensure_user_data(st.session_state, st.session_state.username)
+    settings = st.session_state.user_settings[st.session_state.username]
+
+    st.subheader("👤 Profile & Settings")
+
+    st.markdown(f"""
+    <div class="profile-box">
+        <h4>Account Details</h4>
+        <p><b>Full Name:</b> {st.session_state.full_name}</p>
+        <p><b>Username:</b> {st.session_state.username}</p>
+        <p><b>Theme:</b> {settings['theme_name']}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<div class='settings-box'><h4>Study Preferences</h4></div>", unsafe_allow_html=True)
+
+    session_length = st.selectbox(
+        "Preferred session length (minutes)",
+        [30, 45, 60, 90],
+        index=[30, 45, 60, 90].index(settings["preferred_session_length"])
+    )
+
+    daily_goal = st.number_input(
+        "Daily study goal (minutes)",
+        min_value=30,
+        max_value=600,
+        value=settings["daily_study_goal_minutes"],
+        step=30
+    )
+
+    mode_options = ["Cute", "Strict", "Balanced", "Brutal"]
+    current_mode = settings["motivational_mode"] if settings["motivational_mode"] in mode_options else "Cute"
+
+    motivational_mode = st.selectbox(
+        "Motivational mode",
+        mode_options,
+        index=mode_options.index(current_mode)
+    )
+
+    if st.button("Save Preferences", type="primary"):
+        st.session_state.user_settings[st.session_state.username]["preferred_session_length"] = session_length
+        st.session_state.user_settings[st.session_state.username]["daily_study_goal_minutes"] = daily_goal
+        st.session_state.user_settings[st.session_state.username]["motivational_mode"] = motivational_mode
+        st.success("Preferences saved successfully.")
+        st.rerun()
+
+    if st.session_state.last_plan_data:
+        progress_summary = get_progress_summary(
+            st.session_state,
+            st.session_state.username,
+            st.session_state.last_plan_data["timetable_df"],
+            format_minutes
+        )
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='level-box'><h4>⭐ Your Study Level</h4><p><b>Level {progress_summary['level']}</b> • XP: <b>{progress_summary['xp']}</b> • XP to next level: <b>{progress_summary['xp_to_next_level']}</b></p></div>",
+            unsafe_allow_html=True
+        )
+
+        st.markdown("### 🏆 Earned Badges")
+        if progress_summary["badges"]:
+            for badge in progress_summary["badges"]:
+                st.markdown(f"<div class='badge-box'>{badge}</div>", unsafe_allow_html=True)
+        else:
+            st.info("No badges yet. Complete sessions to unlock them.")
+
+
+def history_page():
+    ensure_user_data(st.session_state, st.session_state.username)
+    history = st.session_state.planner_history.get(st.session_state.username, [])
+
+    st.subheader("🕰 Saved Plans")
+
+    upload_file = st.file_uploader("Import full plan JSON", type=["json"])
+    if upload_file is not None:
+        imported_plan, error = import_plan_json(upload_file)
+        if error:
+            st.error(error)
+        else:
+            st.session_state.planner_history[st.session_state.username].append(imported_plan)
+            st.success("Plan imported successfully.")
+            st.rerun()
+
+    if not history:
+        st.info("No saved plans yet. Generate a plan first.")
+        return
+
+    for idx, plan in enumerate(reversed(history)):
+        actual_index = len(history) - 1 - idx
+        summary = plan.get("summary_values", {})
+
+        st.markdown("<div class='history-card'>", unsafe_allow_html=True)
+        st.markdown(f"### 📘 Plan {actual_index + 1}")
+        st.write(f"**Saved at:** {plan.get('saved_at', '-')}")
+        st.write(f"**Top Subject:** {summary.get('most_prioritized_subject', '-')}")
+        st.write(f"**Weakest Topic:** {summary.get('weakest_topic', '-')}")
+        st.write(f"**Total Topics:** {summary.get('total_topics', '-')}")
+        st.write(f"**Study Time:** {summary.get('total_study_time', '-')}")
+        st.write(f"**Readiness:** {summary.get('overall_readiness', '-')}%")
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button(f"Open Plan {actual_index}", key=f"open_{actual_index}"):
+                load_plan_into_session(st.session_state, st.session_state.username, plan)
+                st.session_state.current_page = "Planner"
+                st.success("Plan loaded successfully.")
+                st.rerun()
+
+        with c2:
+            json_bytes = export_plan_json(plan)
+            st.download_button(
+                label=f"Export JSON {actual_index}",
+                data=json_bytes,
+                file_name=f"smart_revision_plan_{plan.get('plan_id', actual_index)}.json",
+                mime="application/json",
+                key=f"export_{actual_index}"
+            )
+
+        with c3:
+            if st.button(f"Delete Plan {actual_index}", key=f"delete_{actual_index}"):
+                st.session_state.planner_history[st.session_state.username].pop(actual_index)
+                st.success("Plan deleted successfully.")
+                st.rerun()
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    if st.button("Clear All Saved Plans"):
+        st.session_state.planner_history[st.session_state.username] = []
+        st.success("All saved plans cleared.")
+        st.rerun()
+
+
+def planner_page():
+    ensure_user_data(st.session_state, st.session_state.username)
+    settings = st.session_state.user_settings[st.session_state.username]
+
+    st.subheader("🧠 Build Your Revision Plan")
+
+    top_col1, top_col2, top_col3 = st.columns([1, 1, 1])
+    with top_col1:
+        use_sample = st.checkbox("Load sample demo data")
+    with top_col2:
+        show_fun_mode = st.checkbox("Cute mode visuals", value=True)
+    with top_col3:
+        if st.button("Reset Form"):
+            st.rerun()
+
+    if use_sample:
+        subjects_data = load_sample_data()
+        st.info("Sample data loaded. Click the button below to generate the planner.")
+    else:
+        num_subjects = st.number_input(
+            "How many subjects do you want to enter?",
+            min_value=1, max_value=10, value=2, step=1
+        )
+        subjects_data = []
+
+        for s in range(num_subjects):
+            st.markdown(f"<div class='section-card'><h3>Subject {s+1}</h3></div>", unsafe_allow_html=True)
+
+            subject_name = st.text_input(f"Enter subject name for Subject {s+1}", key=f"subject_name_{s}").strip()
+
+            col1, col2 = st.columns(2)
+            with col1:
+                time_value = st.number_input(
+                    f"Enter time left before exam for Subject {s+1}",
+                    min_value=1, value=7, step=1, key=f"time_value_{s}"
+                )
+            with col2:
+                time_unit = st.selectbox(
+                    f"Select time unit for Subject {s+1}",
+                    ["Day(s)", "Week(s)", "Month(s)"],
+                    key=f"time_unit_{s}"
+                )
+
+            days_left = convert_to_days(time_value, time_unit)
+
+            num_topics = st.number_input(
+                f"How many topics for Subject {s+1}?",
+                min_value=1, max_value=10, value=2, step=1, key=f"num_topics_{s}"
+            )
+
+            topics = []
+            seen_topics = set()
+
+            for t in range(num_topics):
+                st.markdown(f"**Topic {t+1}**")
+                topic_col1, topic_col2 = st.columns(2)
+                with topic_col1:
+                    topic_name = st.text_input(f"Enter topic {t+1} name", key=f"topic_name_{s}_{t}").strip()
+                with topic_col2:
+                    weakness_level = st.slider(
+                        f"Weakness level for Topic {t+1}",
+                        min_value=1, max_value=5, value=3, key=f"weakness_{s}_{t}"
+                    )
+
+                if topic_name:
+                    topic_key = topic_name.lower()
+                    if topic_key not in seen_topics:
+                        topics.append((topic_name, weakness_level))
+                        seen_topics.add(topic_key)
+
+            if subject_name:
+                subjects_data.append({
+                    "subject_name": subject_name,
+                    "days_left": days_left,
+                    "topics": topics
+                })
+
+    generate = st.button("Generate Smart Revision Plan", type="primary")
+
+    if generate:
+        if len(subjects_data) == 0:
+            st.error("Please enter at least one subject.")
+            return
+
+        current_mode = settings["motivational_mode"]
+        result = process_all_subjects(subjects_data, current_mode, get_mode_tone_text)
+        if "error" in result:
+            st.error(result["error"])
+            return
+
+        all_subject_results = result["all_subject_results"]
+        topic_df = flatten_topics(all_subject_results)
+        timetable_df = generate_study_timetable(
+            topic_df,
+            start_date=date.today(),
+            preferred_session_length=settings["preferred_session_length"]
+        )
+        today_focus = get_today_focus(topic_df)
+
+        total_topics = len(topic_df)
+        total_minutes = int(topic_df["Recommended Minutes"].sum()) if not topic_df.empty else 0
+        most_prioritized_subject = all_subject_results[0]["subject_name"]
+        weakest_topic_row = topic_df.sort_values(
+            by=["Weakness Level", "Recommended Minutes"],
+            ascending=[False, False]
+        ).iloc[0]
+        weakest_topic = f"{weakest_topic_row['Topic']} ({weakest_topic_row['Subject']})"
+        overall_readiness = int(sum(s["readiness_score"] for s in all_subject_results) / len(all_subject_results))
+
+        summary_values = {
+            "most_prioritized_subject": most_prioritized_subject,
+            "weakest_topic": weakest_topic,
+            "total_topics": total_topics,
+            "total_study_time": format_minutes(total_minutes),
+            "overall_readiness": overall_readiness
+        }
+
+        st.session_state.user_progress[st.session_state.username]["plans_generated"] += 1
+
+        st.session_state.last_plan_data = {
+            "all_subject_results": all_subject_results,
+            "topic_df": topic_df,
+            "timetable_df": timetable_df,
+            "summary_values": summary_values,
+            "today_focus": today_focus,
+            "generated_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        plan_snapshot = build_plan_snapshot(
+            st.session_state,
+            st.session_state.username,
+            summary_values,
+            subjects_data,
+            all_subject_results,
+            topic_df,
+            timetable_df,
+            today_focus
+        )
+        save_full_plan_entry(st.session_state, st.session_state.username, plan_snapshot)
+
+        if overall_readiness >= 80 and show_fun_mode:
+            st.balloons()
+
+        st.success("Your smart revision plan has been generated and saved as a full reusable plan.")
+        st.rerun()
+
+    plan = st.session_state.last_plan_data
+    if not plan:
+        return
+
+    all_subject_results = plan["all_subject_results"]
+    topic_df = plan["topic_df"]
+    timetable_df = plan["timetable_df"]
+    summary_values = plan["summary_values"]
+    today_focus = plan["today_focus"]
+
+    total_topics = summary_values["total_topics"]
+    total_minutes = int(topic_df["Recommended Minutes"].sum()) if not topic_df.empty else 0
+    overall_readiness = summary_values["overall_readiness"]
+    progress_summary = get_progress_summary(
+        st.session_state,
+        st.session_state.username,
+        timetable_df,
+        format_minutes
+    )
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Top Subject", shorten_text(summary_values["most_prioritized_subject"]))
+    c2.metric("Weakest Topic", shorten_text(summary_values["weakest_topic"]))
+    c3.metric("Total Topics", total_topics)
+    c4.metric("Study Time", format_minutes(total_minutes))
+    c5.metric("Readiness", f"{overall_readiness}%")
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+
+    p1, p2, p3, p4, p5 = st.columns(5)
+    p1.metric("Completed", f"{progress_summary['completed_sessions']}/{progress_summary['total_sessions']}")
+    p2.metric("Progress", f"{progress_summary['completion_percent']}%")
+    p3.metric("XP", progress_summary["xp"])
+    p4.metric("Level", progress_summary["level"])
+    p5.metric("Streak", f"{progress_summary['current_streak']} day(s)")
+
+    st.progress(progress_summary["completion_percent"] / 100)
+
+    planner_feedback = get_mode_feedback_text(settings["motivational_mode"], overall_readiness)
+    motivation_line = get_motivation_message(
+        settings["motivational_mode"],
+        progress_summary["completion_percent"],
+        progress_summary["current_streak"]
+    )
+
+    st.markdown(
+        f"<div class='feedback-box'><b>Motivation:</b><br>{motivation_line}<br><br><b>Planner Feedback:</b><br>{planner_feedback}</div>",
+        unsafe_allow_html=True
+    )
+
+    mini1, mini2 = st.columns(2)
+    with mini1:
+        mood_text = get_study_mood(overall_readiness)
+        st.markdown(
+            f"<div class='mini-card'><h4>🌷 Planner Status</h4><p>{mood_text}</p><p>Your current readiness is <b>{overall_readiness}%</b>.</p></div>",
+            unsafe_allow_html=True
+        )
+    with mini2:
+        if today_focus:
+            st.markdown(
+                f"<div class='mini-card'><h4>🎯 Today's Focus</h4><p><b>{today_focus['topic']}</b> — {today_focus['subject']}</p><p>Reason: {today_focus['reason']}</p></div>",
+                unsafe_allow_html=True
+            )
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🌟 Dashboard",
+        "✅ Daily Checklist",
+        "📌 Subjects",
+        "🗓 Timetable",
+        "📅 Calendar View"
+    ])
+
+    with tab1:
+        dash_col1, dash_col2 = st.columns(2)
+        with dash_col1:
+            st.markdown("<div class='section-card'><b>Subject Priority Score</b></div>", unsafe_allow_html=True)
+            subject_chart_df = pd.DataFrame([
+                {"Subject": f"{s['subject_icon']} {s['subject_name']}", "Priority Score": s["subject_priority_score"]}
+                for s in all_subject_results
+            ])
+            st.bar_chart(subject_chart_df.set_index("Subject"))
+
+        with dash_col2:
+            st.markdown("<div class='section-card'><b>Topic Weakness Level</b></div>", unsafe_allow_html=True)
+            weakness_chart_df = topic_df[["Topic", "Weakness Level"]].copy()
+            st.bar_chart(weakness_chart_df.set_index("Topic"))
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        low1, low2 = st.columns(2)
+        with low1:
+            st.markdown("<div class='section-card'><b>Workload by Subject</b></div>", unsafe_allow_html=True)
+            workload_df = get_workload_by_subject(topic_df)
+            st.bar_chart(workload_df.set_index("Subject"))
+        with low2:
+            st.markdown("<div class='section-card'><b>Focus Distribution</b></div>", unsafe_allow_html=True)
+            focus_df = get_focus_distribution(topic_df)
+            st.bar_chart(focus_df.set_index("Category"))
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        extra1, extra2, extra3 = st.columns(3)
+        extra1.markdown(
+            f"<div class='progress-card'><h4>🔥 Current Streak</h4><p><b>{progress_summary['current_streak']}</b> day(s)</p></div>",
+            unsafe_allow_html=True
+        )
+        extra2.markdown(
+            f"<div class='progress-card'><h4>🏆 Best Streak</h4><p><b>{progress_summary['best_streak']}</b> day(s)</p></div>",
+            unsafe_allow_html=True
+        )
+        extra3.markdown(
+            f"<div class='progress-card'><h4>🎖 Badges</h4><p><b>{len(progress_summary['badges'])}</b> unlocked</p></div>",
+            unsafe_allow_html=True
+        )
+
+        st.markdown("### 🏅 Badges")
+        if progress_summary["badges"]:
+            for badge in progress_summary["badges"]:
+                st.markdown(f"<div class='badge-box'>{badge}</div>", unsafe_allow_html=True)
+        else:
+            st.info("Complete sessions to unlock badges.")
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+
+        overdue_df = get_overdue_sessions(st.session_state, st.session_state.username, timetable_df)
+        today_df = get_today_sessions(st.session_state, st.session_state.username, timetable_df)
+        done_today_minutes, goal_percent = get_daily_goal_progress(
+            st.session_state,
+            st.session_state.username,
+            timetable_df,
+            settings["daily_study_goal_minutes"]
+        )
+
+        s1, s2, s3 = st.columns(3)
+        s1.markdown(
+            f"<div class='progress-card'><h4>⏰ Overdue Sessions</h4><p><b>{len(overdue_df)}</b></p></div>",
+            unsafe_allow_html=True
+        )
+        s2.markdown(
+            f"<div class='progress-card'><h4>📍 Today's Sessions</h4><p><b>{len(today_df)}</b></p></div>",
+            unsafe_allow_html=True
+        )
+        s3.markdown(
+            f"<div class='progress-card'><h4>🎯 Daily Goal</h4><p><b>{done_today_minutes}/{settings['daily_study_goal_minutes']} min</b></p></div>",
+            unsafe_allow_html=True
+        )
+
+        st.progress(goal_percent / 100)
+
+        if not overdue_df.empty:
+            st.warning(f"You have {len(overdue_df)} overdue session(s). Time to catch up.")
+
+    with tab2:
+        st.markdown("### ✅ Daily Study Checklist")
+
+        overdue_df = get_overdue_sessions(st.session_state, st.session_state.username, timetable_df)
+        if not overdue_df.empty:
+            st.warning(f"You currently have {len(overdue_df)} overdue session(s).")
+
+        available_dates = sorted(timetable_df["Calendar Date"].unique().tolist())
+        today_str = date.today().strftime("%Y-%m-%d")
+        default_index = available_dates.index(today_str) if today_str in available_dates else 0
+
+        selected_date = st.selectbox("Choose checklist date", options=available_dates, index=default_index)
+
+        action1, action2, action3 = st.columns(3)
+        with action1:
+            if st.button("Mark All Completed"):
+                mark_all_for_date(st.session_state, st.session_state.username, timetable_df, selected_date, completed=True)
+                st.success("All sessions for selected date marked completed.")
+                st.rerun()
+        with action2:
+            if st.button("Unmark All"):
+                mark_all_for_date(st.session_state, st.session_state.username, timetable_df, selected_date, completed=False)
+                st.success("All sessions for selected date unmarked.")
+                st.rerun()
+        with action3:
+            if st.button("Reset All Progress"):
+                reset_all_progress(st.session_state, st.session_state.username)
+                st.success("All progress has been reset.")
+                st.rerun()
+
+        daily_df = timetable_df[timetable_df["Calendar Date"] == selected_date].copy()
+
+        if daily_df.empty:
+            st.info("No sessions scheduled for this date.")
+        else:
+            completed_count = 0
+
+            for _, row in daily_df.iterrows():
+                session_id = row["Session ID"]
+                is_done = get_session_completed(st.session_state, st.session_state.username, session_id)
+
+                st.markdown("<div class='checklist-card'>", unsafe_allow_html=True)
+                st.markdown(
+                    f"**{row['Session ID']} • {row['Subject']}**  \n"
+                    f"Topic: **{row['Topic']}**  \n"
+                    f"Duration: **{row['Study Duration']}**  \n"
+                    f"Method: **{row['Study Method']}**  \n"
+                    f"{get_completion_badge(is_done)}",
+                    unsafe_allow_html=True
+                )
+
+                checked = st.checkbox(
+                    f"Mark {session_id} as completed",
+                    value=is_done,
+                    key=f"check_{session_id}"
+                )
+
+                if checked != is_done:
+                    set_session_completed(st.session_state, st.session_state.username, session_id, checked)
+                    st.rerun()
+
+                if checked:
+                    completed_count += 1
+
+                st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown("<hr>", unsafe_allow_html=True)
+
+            percent = int((completed_count / len(daily_df)) * 100) if len(daily_df) > 0 else 0
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Sessions for Selected Date", len(daily_df))
+            c2.metric("Completed", completed_count)
+            c3.metric("Daily Completion", f"{percent}%")
+            st.progress(percent / 100)
+
+    with tab3:
+        for i, subject in enumerate(all_subject_results, start=1):
+            st.markdown("<div class='subject-card'>", unsafe_allow_html=True)
+            st.markdown(
+                f"## {subject['subject_icon']} Subject Rank {i}: {subject['subject_name']} " + get_priority_badge(subject["exam_priority"]),
+                unsafe_allow_html=True
+            )
+
+            info1, info2, info3, info4, info5 = st.columns(5)
+            info1.markdown(f"<div class='small-label'>Days Left</div><div class='big-value'>{subject['days_left']} day(s)</div>", unsafe_allow_html=True)
+            info2.markdown(f"<div class='small-label'>Exam Priority</div><div class='big-value'>{subject['exam_priority']}</div>", unsafe_allow_html=True)
+            info3.markdown(f"<div class='small-label'>Top Topic</div><div class='big-value'>{subject['most_prioritized_topic']}</div>", unsafe_allow_html=True)
+            info4.markdown(f"<div class='small-label'>Readiness</div><div class='big-value'>{subject['readiness_score']}%</div>", unsafe_allow_html=True)
+            info5.markdown(f"<div class='small-label'>Status</div><div class='big-value'>{subject['readiness_status']}</div>", unsafe_allow_html=True)
+
+            st.markdown("### Topic Suggestions")
+            for j, topic in enumerate(subject["topic_suggestions"], start=1):
+                with st.expander(f"Topic {j}: {topic['topic']}"):
+                    live_reminder, live_suggestion, live_best_tip = get_mode_tone_text(
+                        settings["motivational_mode"],
+                        topic["weakness_level"],
+                        topic["topic"]
+                    )
+
+                    st.write(f"**Weakness Level:** {topic['weakness_level']}")
+                    st.progress(topic["weakness_level"] / 5)
+                    st.write(f"**Recommended Study Duration:** {format_minutes(topic['recommended_minutes'])}")
+                    st.write(f"**Study Method:** {topic['study_method']}")
+                    st.write(f"**Reminder:** {live_reminder}")
+                    st.write(f"**Suggestion:** {live_suggestion}")
+                    st.write(f"**Best Tip:** {live_best_tip}")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    with tab4:
+        if timetable_df.empty:
+            st.info("No timetable generated.")
+        else:
+            enriched_df = enrich_timetable_status(st.session_state, st.session_state.username, timetable_df)
+
+            filter_col1, filter_col2, filter_col3 = st.columns(3)
+            with filter_col1:
+                subject_options = ["All"] + sorted(enriched_df["Subject"].dropna().unique().tolist())
+                selected_subject = st.selectbox("Filter by subject", subject_options)
+
+            with filter_col2:
+                status_options = ["All", "Completed", "Overdue", "Today", "Upcoming"]
+                selected_status = st.selectbox("Filter by status", status_options)
+
+            with filter_col3:
+                search_text = st.text_input("Search timetable", placeholder="Search topic, subject, method, session ID")
+
+            filtered_df = filter_timetable_df(
+                enriched_df,
+                subject_filter=selected_subject,
+                status_filter=selected_status,
+                search_text=search_text
+            )
+
+            if filtered_df.empty:
+                st.info("No timetable rows match your filters.")
+            else:
+                st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+
+    with tab5:
+        if timetable_df.empty:
+            st.info("No timetable generated.")
+        else:
+            enriched_df = enrich_timetable_status(st.session_state, st.session_state.username, timetable_df)
+            calendar_df = build_calendar_view(enriched_df)
+
+            st.markdown("### 📅 Calendar-Style Timetable Overview")
+            if calendar_df.empty:
+                st.info("No calendar data available.")
+            else:
+                st.dataframe(calendar_df, use_container_width=True, hide_index=True)
+
+            st.markdown("<hr>", unsafe_allow_html=True)
+            st.markdown("### Select a Date to View Sessions")
+
+            available_dates = sorted(enriched_df["Calendar Date"].unique().tolist())
+            today_str = date.today().strftime("%Y-%m-%d")
+            default_index = available_dates.index(today_str) if today_str in available_dates else 0
+
+            selected_calendar_date = st.selectbox(
+                "Choose calendar date",
+                options=available_dates,
+                index=default_index,
+                key="calendar_date_view"
+            )
+
+            selected_day_df = enriched_df[enriched_df["Calendar Date"] == selected_calendar_date].copy()
+
+            if selected_day_df.empty:
+                st.info("No sessions scheduled for this date.")
+            else:
+                st.dataframe(selected_day_df, use_container_width=True, hide_index=True)
+
+
+def downloads_page():
+    ensure_user_data(st.session_state, st.session_state.username)
+
+    st.subheader("📥 Downloads")
+    plan = st.session_state.last_plan_data
+
+    if not plan:
+        st.info("No generated planner found yet. Go to Planner first.")
+        return
+
+    summary_values = plan["summary_values"]
+    timetable_df = plan["timetable_df"]
+    all_subject_results = plan["all_subject_results"]
+    progress_summary = get_progress_summary(
+        st.session_state,
+        st.session_state.username,
+        timetable_df,
+        format_minutes
+    )
+
+    overall_readiness = summary_values["overall_readiness"]
+    mode = st.session_state.user_settings[st.session_state.username]["motivational_mode"]
+    feedback_text = get_mode_feedback_text(mode, overall_readiness)
+
+    st.markdown(
+        f"<div class='feedback-box'><b>Personalized Feedback:</b><br>{feedback_text}</div>",
+        unsafe_allow_html=True
+    )
+
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Progress", f"{progress_summary['completion_percent']}%")
+    p2.metric("Completed Sessions", f"{progress_summary['completed_sessions']}/{progress_summary['total_sessions']}")
+    p3.metric("Current Streak", f"{progress_summary['current_streak']} day(s)")
+    p4.metric("Level", progress_summary["level"])
+
+    pdf_bytes = build_revision_pdf(all_subject_results, summary_values, timetable_df, progress_summary, format_minutes)
+    txt_data = create_download_text(all_subject_results, summary_values, timetable_df, progress_summary, format_minutes)
+
+    enriched_csv_df = enrich_timetable_status(st.session_state, st.session_state.username, timetable_df)
+    enriched_csv_df["Completed"] = enriched_csv_df["Session ID"].apply(
+        lambda x: "Yes" if get_session_completed(st.session_state, st.session_state.username, x) else "No"
+    )
+    csv_data = enriched_csv_df.to_csv(index=False).encode("utf-8")
+
+    st.markdown("<div class='download-card'><b>📄 PDF Version</b><br>Best for presentation or saving a polished report.</div>", unsafe_allow_html=True)
+    st.download_button("📄 Download Styled Revision Plan (.pdf)", data=pdf_bytes, file_name="smart_revision_plan.pdf", mime="application/pdf")
+
+    st.markdown("<div class='download-card'><b>📝 TXT Version</b><br>Best for simple quick notes.</div>", unsafe_allow_html=True)
+    st.download_button("📝 Download Revision Plan (.txt)", data=txt_data, file_name="smart_revision_plan.txt", mime="text/plain")
+
+    st.markdown("<div class='download-card'><b>📊 CSV Timetable</b><br>Best for editing schedule data.</div>", unsafe_allow_html=True)
+    st.download_button("📊 Download Timetable (.csv)", data=csv_data, file_name="study_timetable.csv", mime="text/csv")
